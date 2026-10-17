@@ -63,7 +63,14 @@ To check what it would do without logging anyone out:
 sudo osascript -l JavaScript "/Library/Application Support/qustodio-guard/guard.js" /var/root/qustodio-guard --dry-run
 ```
 
-The log is in `/var/log/qustodio-guard.log`. To remove it: `sudo ./uninstall.sh`.
+The log is in `/var/log/qustodio-guard.log`. To remove everything, including the token:
+`sudo "/Library/Application Support/qustodio-guard/uninstall.sh"`.
+
+**Updates.** A second daemon pulls `main` from this repository every 6 hours and replaces the
+installed scripts that changed. It only does so if the new `guard.js` compiles, so a broken
+push leaves the old version running. Changes to `install.sh` itself (the launchd plists) are
+logged but need a manual re-run. Remember what this means: whoever can push to `main` runs code
+as root on the child's Mac. Fork it if you want to own that.
 
 Optional `/var/root/qustodio-guard/config.json`:
 
