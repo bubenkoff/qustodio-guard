@@ -6,7 +6,8 @@
 // outside its allowed hours, and if so ends the kid's session. It polls, so there is no unlock
 // event to race.
 //
-// Run by launchd as root every minute:
+// Run by launchd as root every 5 seconds. Each run decides from the cached state — no network —
+// and talks to the API at most once a minute (REFRESH_MS), succeed or fail:
 //   osascript -l JavaScript guard.js <state-dir> [--dry-run]
 // <state-dir> is root-only (700): token (refresh token), state.json, req.cfg, and an optional
 // config.json. See README.md.
@@ -22,6 +23,9 @@ const CLIENT_ID = '264ca1d226906aa08b03';
 const CLIENT_SECRET = '3e8826cbed3b996f8b206c7d6a4b2321529bc6bd';
 const DAYS = ['sun', 'mon', 'tue', 'wed', 'thr', 'fri', 'sat']; // Qustodio spells Thursday "thr"
 const MACOS = 1; // device.platform
+const REFRESH_MS = 60e3;  // API at most this often; screen time there lags minutes anyway
+const TICK_GAP_MS = 30e3; // a longer gap between runs means the Mac slept: not screen time
+const IDLE_MS = 120e3;    // no keyboard/mouse for this long: away, not screen time
 // The warning dialog, in the kid's macOS language. config.json "lang" or "message" overrides.
 const TEXTS = {
   en: { hours: 'outside allowed hours', quota: 'daily limit used ({used} of {quota} min)',
@@ -59,7 +63,7 @@ function readJSON(path, dflt) {
 
 // Secrets reach curl through a root-only config file, never argv: a kid can read `ps`.
 function curl(dir, url, opts) {
-  const lines = ['url = "' + url + '"', 'silent', 'show-error', 'fail', 'max-time = 20'];
+  const lines = ['url = "' + url + '"', 'silent', 'show-error', 'fail', 'connect-timeout = 5', 'max-time = 10'];
   if (opts.bearer) lines.push('header = "Authorization: Bearer ' + opts.bearer + '"');
   for (const [k, v] of Object.entries(opts.form || {}))
     lines.push('data-urlencode = "' + k + '=' + v + '"');
@@ -143,6 +147,22 @@ function refresh(dir, cfg, st, kid, u, today) {
   const it = (ex.items_list || [])[0];
   kid.extra = it && it.duration > 0 ? { start: Date.parse(it.rrule_dtstart), seconds: it.duration } : null;
   kid.used_date = today;
+  kid.local_ms = 0; // the cloud figure now covers everything up to here
+  kid.local_date = today;
+}
+
+function idleMs() {
+  const m = sh("/usr/sbin/ioreg -c IOHIDSystem -d 4 | /usr/bin/awk '/HIDIdleTime/ {print $NF; exit}'").match(/\d+/);
+  return m ? Number(m[0]) / 1e6 : 0; // nanoseconds
+}
+
+// Screen time counted on the Mac since the last good API read, so that going offline does not
+// freeze the quota. Sleep gaps and idle time are skipped; the counter restarts at midnight.
+function tick(kid, now, today) {
+  if (kid.local_date !== today) { kid.local_ms = 0; kid.local_date = today; }
+  const gap = kid.last_tick ? now - kid.last_tick : 0;
+  if (gap > 0 && gap < TICK_GAP_MS && idleMs() < IDLE_MS) kid.local_ms = (kid.local_ms || 0) + gap;
+  kid.last_tick = now.getTime();
 }
 
 // Why the session must end, or null. Works from cached state when the API is unreachable,
@@ -156,8 +176,9 @@ function verdict(kid, now, today) {
   const mask = kid.rules.time_ranges[day] || 0; // bit h set = hour h is blocked
   if (mask & (1 << now.getHours())) return { code: 'hours' };
   const quota = (kid.rules.quotas[day] || 0) + (extra ? Math.round(extra.seconds / 60) : 0);
-  if (kid.rules.quotas[day] > 0 && kid.used_date === today && kid.used_min >= quota)
-    return { code: 'quota', used: kid.used_min, quota };
+  const used = (kid.used_date === today ? kid.used_min : 0) +
+               (kid.local_date === today ? Math.floor((kid.local_ms || 0) / 60e3) : 0);
+  if (kid.rules.quotas[day] > 0 && used >= quota) return { code: 'quota', used, quota };
   return null;
 }
 function why(v, lang) { return v && fill((TEXTS[lang] || TEXTS.en)[v.code], v); }
@@ -202,20 +223,24 @@ function run(argv) {
   if (cfg.user ? u.name !== cfg.user : u.admin && !dry) return save();   // parents are not guarded
 
   const kid = st.kids[u.uid] = st.kids[u.uid] || {};
-  try {
-    refresh(dir, cfg, st, kid, u, today);
-    if (kid.api_fail) log('API back after ' + kid.api_fail + ' failed polls');
-    kid.api_fail = 0;
-  } catch (e) {
-    kid.api_fail = (kid.api_fail || 0) + 1;
-    st.access_token = null; // a revoked token would otherwise be reused until it expires
-    if (kid.api_fail === 1 || kid.api_fail % 60 === 0)
-      log('API failed (' + kid.api_fail + ' in a row), using cache: ' + e.message);
+  tick(kid, now, today);
+  if (dry || !kid.fetched_at || now - kid.fetched_at >= REFRESH_MS) {
+    kid.fetched_at = now.getTime(); // failures wait their turn too: no hammering while offline
+    try {
+      refresh(dir, cfg, st, kid, u, today);
+      if (kid.api_fail) log('API back after ' + kid.api_fail + ' failed polls');
+      kid.api_fail = 0;
+    } catch (e) {
+      kid.api_fail = (kid.api_fail || 0) + 1;
+      st.access_token = null; // a revoked token would otherwise be reused until it expires
+      if (kid.api_fail === 1 || kid.api_fail % 60 === 0)
+        log('API failed (' + kid.api_fail + ' in a row), using cache: ' + e.message);
+    }
   }
 
   const v = verdict(kid, now, today);
   if (dry) log('dry run for ' + u.name + ' → ' + (kid.profile_name || '?') + ': used ' + kid.used_min +
-               ' min on ' + kid.used_date + ', extra ' + JSON.stringify(kid.extra || null) +
+               ' min on ' + kid.used_date + ' + ' + Math.floor((kid.local_ms || 0) / 60e3) + ' local, extra ' + JSON.stringify(kid.extra || null) +
                ', lang ' + kid.lang + ', verdict: ' + (why(v, 'en') || 'allowed') +
                (v ? '\n  dialog: ' + warning(cfg, kid, v, (cfg.grace_seconds || 60) * 1000) : ''));
   else enforce(cfg, kid, u, v, now);

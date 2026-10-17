@@ -1,7 +1,8 @@
 #!/bin/zsh
 # Self-update from GitHub main. Run by launchd as root every 6 hours (installed by install.sh).
 # Only files that changed are replaced, and only after guard.js compiles — a broken push must
-# not leave the kid unguarded. A change to install.sh itself (the plists) needs a manual re-run.
+# not leave the kid unguarded. A changed install.sh is run too (plists); the updater's own plist
+# is the one thing that still needs a manual re-run.
 set -eu -o pipefail
 REPO=bubenkoff/qustodio-guard
 LIB="/Library/Application Support/qustodio-guard"
@@ -24,5 +25,10 @@ for f in guard.js qustodio-token.sh update.sh uninstall.sh; do
   changed+=($f)
 done
 (( $#changed )) && log "updated ${changed[*]}"
-cmp -s $src/install.sh "$LIB/install.sh" 2>/dev/null || log "install.sh changed on main — re-run it to apply"
+# A new install.sh may carry new launchd plists; it reloads only the jobs whose plist changed,
+# and leaves this updater's own job alone while we are inside it.
+if ! cmp -s $src/install.sh "$LIB/install.sh"; then
+  QG_FROM_UPDATE=1 /bin/zsh $src/install.sh </dev/null && log "applied new install.sh" \
+    || log "new install.sh failed, re-run it by hand"
+fi
 exit 0
