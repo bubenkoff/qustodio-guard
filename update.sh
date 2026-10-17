@@ -2,7 +2,7 @@
 # Self-update from GitHub main. Run by launchd as root every 6 hours (installed by install.sh).
 # Only files that changed are replaced, and only after guard.js compiles — a broken push must
 # not leave the kid unguarded. A change to install.sh itself (the plists) needs a manual re-run.
-set -eu
+set -eu -o pipefail
 REPO=bubenkoff/qustodio-guard
 LIB="/Library/Application Support/qustodio-guard"
 log() { print -r -- "$(date -u +%FT%TZ) update: $*"; }
