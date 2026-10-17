@@ -22,7 +22,22 @@ const CLIENT_ID = '264ca1d226906aa08b03';
 const CLIENT_SECRET = '3e8826cbed3b996f8b206c7d6a4b2321529bc6bd';
 const DAYS = ['sun', 'mon', 'tue', 'wed', 'thr', 'fri', 'sat']; // Qustodio spells Thursday "thr"
 const MACOS = 1; // device.platform
-const DEFAULT_MESSAGE = "Time's up: {why}.\nSave your work — you will be logged out in {seconds} s.";
+// The warning dialog, in the kid's macOS language. config.json "lang" or "message" overrides.
+const TEXTS = {
+  en: { hours: 'outside allowed hours', quota: 'daily limit used ({used} of {quota} min)',
+        text: "Time's up: {why}.\nSave your work — you will be logged out in {seconds} s." },
+  uk: { hours: 'поза дозволеними годинами', quota: 'денний ліміт вичерпано ({used} з {quota} хв)',
+        text: 'Час вийшов: {why}.\nЗбережи роботу — через {seconds} с буде вихід із системи.' },
+  nl: { hours: 'buiten de toegestane uren', quota: 'daglimiet bereikt ({used} van {quota} min)',
+        text: 'De tijd is om: {why}.\nSla je werk op — over {seconds} s word je uitgelogd.' },
+  de: { hours: 'außerhalb der erlaubten Zeiten', quota: 'Tageslimit erreicht ({used} von {quota} Min.)',
+        text: 'Die Zeit ist um: {why}.\nSpeichere deine Arbeit — in {seconds} s wirst du abgemeldet.' },
+  es: { hours: 'fuera del horario permitido', quota: 'límite diario agotado ({used} de {quota} min)',
+        text: 'Se acabó el tiempo: {why}.\nGuarda tu trabajo: la sesión se cerrará en {seconds} s.' },
+  fr: { hours: 'en dehors des heures autorisées', quota: 'limite quotidienne atteinte ({used} sur {quota} min)',
+        text: 'Le temps est écoulé : {why}.\nEnregistre ton travail — déconnexion dans {seconds} s.' },
+};
+function fill(t, v) { return t.replace(/\{(\w+)\}/g, (m, k) => (k in v ? v[k] : m)); }
 
 function q(s) { return "'" + String(s).replace(/'/g, "'\\''") + "'"; }
 function sh(cmd) { return app.doShellScript(cmd, { alteringLineEndings: false }); }
@@ -75,6 +90,16 @@ function localUser() {
   return { name, uid, admin, realName };
 }
 
+// First entry of the user's AppleLanguages ("uk-NL" → "uk"), falling back to the system's.
+function userLang(u) {
+  for (const cmd of ['/usr/bin/sudo -u ' + q(u.name) + ' /usr/bin/defaults read -g AppleLanguages',
+                     '/usr/bin/defaults read /Library/Preferences/.GlobalPreferences AppleLanguages']) {
+    const m = sh(cmd + ' 2>/dev/null || true').match(/([a-z]{2,3})(?=[-_"\s,]|$)/);
+    if (m) return m[1];
+  }
+  return 'en';
+}
+
 // Which Qustodio profile watches this local user. Qustodio knows: every device lists the
 // local accounts it monitors, as {uid, name, profile_id}. A config.json "profile" overrides.
 function resolveProfile(dir, cfg, u, bearer) {
@@ -102,7 +127,7 @@ function resolveProfile(dir, cfg, u, bearer) {
 function refresh(dir, cfg, st, kid, u, today) {
   const bearer = accessToken(dir, st);
   if (!kid.profile_id || kid.resolved_on !== today) {
-    Object.assign(kid, resolveProfile(dir, cfg, u, bearer), { resolved_on: today });
+    Object.assign(kid, resolveProfile(dir, cfg, u, bearer), { resolved_on: today, lang: userLang(u) });
     log(u.name + ' (uid ' + u.uid + ') is watched by Qustodio profile ' + kid.profile_name);
   }
   const rules = curl(dir, API + '/v1/accounts/' + kid.account_id + '/profiles/' + kid.profile_id + '/rules?app_rules=1', { bearer });
@@ -111,37 +136,52 @@ function refresh(dir, cfg, st, kid, u, today) {
   const hourly = curl(dir, API + '/v2/accounts/' + kid.account_uid + '/profiles/' + kid.profile_uid +
                       '/summary_hourly?date=' + today, { bearer });
   kid.used_min = Math.round(hourly.reduce((a, e) => a + (e.screen_time_seconds || 0), 0) / 60);
+  // Extra time granted from the parent app: a window starting when it was granted, which
+  // Qustodio honours even outside allowed hours. Re-read every poll — it changes any time.
+  const ex = curl(dir, API + '/v2/accounts/' + kid.account_uid + '/profiles/' + kid.profile_uid +
+                  '/rules/calendar_restrictions?custom_filter=newest_today_extra_time', { bearer });
+  const it = (ex.items_list || [])[0];
+  kid.extra = it && it.duration > 0 ? { start: Date.parse(it.rrule_dtstart), seconds: it.duration } : null;
   kid.used_date = today;
 }
 
 // Why the session must end, or null. Works from cached state when the API is unreachable,
 // so switching Wi-Fi off once the limit is hit changes nothing.
+// Returns {code: 'hours'|'quota', used, quota}.
 function verdict(kid, now, today) {
   if (!kid.rules) return null;
+  const extra = kid.used_date === today ? kid.extra : null;
+  if (extra && now >= extra.start && now < extra.start + extra.seconds * 1000) return null; // granted time running
   const day = DAYS[now.getDay()];
   const mask = kid.rules.time_ranges[day] || 0; // bit h set = hour h is blocked
-  if (mask & (1 << now.getHours())) return 'outside allowed hours';
-  const quota = kid.rules.quotas[day] || 0;
-  if (quota > 0 && kid.used_date === today && kid.used_min >= quota)
-    return 'daily limit used (' + kid.used_min + ' of ' + quota + ' min)';
+  if (mask & (1 << now.getHours())) return { code: 'hours' };
+  const quota = (kid.rules.quotas[day] || 0) + (extra ? Math.round(extra.seconds / 60) : 0);
+  if (kid.rules.quotas[day] > 0 && kid.used_date === today && kid.used_min >= quota)
+    return { code: 'quota', used: kid.used_min, quota };
   return null;
 }
+function why(v, lang) { return v && fill((TEXTS[lang] || TEXTS.en)[v.code], v); }
 
-function enforce(cfg, kid, u, why, now) {
+function warning(cfg, kid, v, grace) {
+  const lang = TEXTS[cfg.lang] ? cfg.lang : TEXTS[kid.lang] ? kid.lang : 'en';
+  return fill(cfg.message || TEXTS[lang].text, { why: why(v, lang), seconds: grace / 1000 });
+}
+
+function enforce(cfg, kid, u, v, now) {
   const grace = (cfg.grace_seconds || 60) * 1000;
-  if (!why) { kid.warned_at = null; return; }
+  if (!v) { kid.warned_at = null; return; }
+  const reason = why(v, 'en');
   if (!kid.warned_at || now - kid.warned_at > 30 * 60e3) {
     // First strike: warn and give `grace` to save work. Within 30 min of a warning the next
     // poll logs out straight away, so logging back in buys nothing.
     kid.warned_at = now.getTime();
-    log('warning ' + u.name + ': ' + why);
-    const text = (cfg.message || DEFAULT_MESSAGE).replace('{why}', why).replace('{seconds}', grace / 1000)
-      .replace(/["\\]/g, '\\$&');
+    log('warning ' + u.name + ': ' + reason);
+    const text = warning(cfg, kid, v, grace).replace(/["\\]/g, '\\$&');
     sh('/bin/launchctl asuser ' + u.uid + ' /usr/bin/sudo -u ' + q(u.name) + ' /usr/bin/osascript -e ' +
        q('display dialog "' + text + '" buttons {"OK"} with icon caution giving up after ' + (grace / 1000 - 5)) +
        ' >/dev/null 2>&1 &');
   } else if (now - kid.warned_at >= grace) {
-    log('logging out ' + u.name + ': ' + why);
+    log('logging out ' + u.name + ': ' + reason);
     try { sh('/bin/launchctl bootout gui/' + u.uid); }
     catch (e) { log('bootout failed (' + e.message + '), killing processes'); sh('/usr/bin/pkill -KILL -u ' + u.uid + ' || true'); }
   }
@@ -173,9 +213,11 @@ function run(argv) {
       log('API failed (' + kid.api_fail + ' in a row), using cache: ' + e.message);
   }
 
-  const why = verdict(kid, now, today);
+  const v = verdict(kid, now, today);
   if (dry) log('dry run for ' + u.name + ' → ' + (kid.profile_name || '?') + ': used ' + kid.used_min +
-               ' min on ' + kid.used_date + ', verdict: ' + (why || 'allowed'));
-  else enforce(cfg, kid, u, why, now);
+               ' min on ' + kid.used_date + ', extra ' + JSON.stringify(kid.extra || null) +
+               ', lang ' + kid.lang + ', verdict: ' + (why(v, 'en') || 'allowed') +
+               (v ? '\n  dialog: ' + warning(cfg, kid, v, (cfg.grace_seconds || 60) * 1000) : ''));
+  else enforce(cfg, kid, u, v, now);
   save();
 }

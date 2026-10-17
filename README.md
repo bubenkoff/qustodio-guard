@@ -25,9 +25,13 @@ A LaunchDaemon runs every minute as root. On each run it:
    are never guarded (an admin could remove the guard anyway).
 2. Asks Qustodio's cloud which profile watches that local account. Qustodio lists the accounts it
    monitors on every Mac as `{uid, name, profile}`.
-3. Reads that profile's rules (the daily quota and the allowed hours) and today's screen time.
+3. Reads that profile's rules (the daily quota and the allowed hours), today's screen time,
+   and any **extra time** granted from the parent app today. While a grant is running, nothing
+   is enforced. This matches Qustodio, which honours grants even outside the allowed hours.
+   The granted minutes are also added to the day's quota.
 4. If the quota is used up, or the current hour is outside the allowed hours, it warns the child
-   with a dialog. After 60 seconds it ends the session with `launchctl bootout gui/<uid>`. Within
+   with a dialog in their macOS language (English, Ukrainian, Dutch, German, Spanish, French;
+   anything else falls back to English). After 60 seconds it ends the session with `launchctl bootout gui/<uid>`. Within
    30 minutes of a warning it logs the child out without warning again, so logging back in
    gains nothing.
 
@@ -75,7 +79,7 @@ as root on the child's Mac. Fork it if you want to own that.
 Optional `/var/root/qustodio-guard/config.json`:
 
 ```json
-{ "profile": "Alex", "user": "alex", "grace_seconds": 60,
+{ "profile": "Alex", "user": "alex", "grace_seconds": 60, "lang": "uk",
   "message": "Time's up: {why}.\nSave your work — you will be logged out in {seconds} s." }
 ```
 
@@ -88,8 +92,6 @@ Optional `/var/root/qustodio-guard/config.json`:
   It can change without notice. API failures are logged, and the guard falls back to its cache.
 - **Screen time is per profile**, summed over all of the child's devices, which is how
   Qustodio's own quota counts it. The cloud total lags a few minutes behind real usage.
-- **Extra time granted from the Qustodio app is not seen yet.** Raise the quota for the day
-  instead.
 - The token belongs to the parent account, so anyone with root on that Mac can use it. That is
   the same trust boundary as the Qustodio agent itself.
 - Written in JXA (`osascript -l JavaScript`) with `curl`, both shipped with macOS. There is
