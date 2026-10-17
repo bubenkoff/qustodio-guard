@@ -19,7 +19,9 @@ later, on agent 207.0.7475.1, the bypass still worked. So we built this instead.
 
 ## What it does
 
-A LaunchDaemon runs every minute as root. On each run it:
+A LaunchDaemon runs as root every 5 seconds. Each run decides from cached state, with no network.
+It talks to the Qustodio API at most once a minute; screen time there lags a few minutes anyway.
+On each run it:
 
 1. Looks at who is at the screen. It skips the login window and **admin accounts**, so parents
    are never guarded (an admin could remove the guard anyway).
@@ -31,13 +33,18 @@ A LaunchDaemon runs every minute as root. On each run it:
    The granted minutes are also added to the day's quota.
 4. If the quota is used up, or the current hour is outside the allowed hours, it warns the child
    with a dialog in their macOS language (English, Ukrainian, Dutch, German, Spanish, French;
-   anything else falls back to English). After 60 seconds it ends the session with `launchctl bootout gui/<uid>`. Within
-   30 minutes of a warning it logs the child out without warning again, so logging back in
-   gains nothing.
+   anything else falls back to English). After 60 seconds it ends that user's session, and only
+   that user's, with `launchctl bootout gui/<uid>`. For 30 minutes after a warning, every new
+   login is ended within about 5 seconds.
 
-It polls rather than reacting to an unlock event, so there is no event to race. The rules
-and today's usage are cached. If the child switches off Wi-Fi after the limit is hit, they
-stay locked out, and the allowed hours still apply offline.
+It polls rather than reacting to an unlock event, so there is no event to race.
+
+**Offline.** The rules, today's usage and any running grant are cached. While the API cannot
+be reached, the guard adds the screen time it counts on the Mac itself to the last figure it
+got from the cloud. Sleep and more than 2 minutes without keyboard or mouse input do not count.
+So switching Wi-Fi off near the limit does not stop the clock, and the allowed hours still
+apply. Failed API calls are retried once a minute, not every 5 seconds. Offline counting
+restarts at midnight.
 
 Your settings stay in one place, Qustodio. The daemon only enforces them.
 
@@ -72,8 +79,9 @@ The log is in `/var/log/qustodio-guard.log`. To remove everything, including the
 
 **Updates.** A second daemon pulls `main` from this repository every 6 hours and replaces the
 installed scripts that changed. It only does so if the new `guard.js` compiles, so a broken
-push leaves the old version running. Changes to `install.sh` itself (the launchd plists) are
-logged but need a manual re-run. Remember what this means: whoever can push to `main` runs code
+push leaves the old version running. If `install.sh` changed, the updater runs it, and it
+reloads only the launchd jobs whose plist changed. The one exception is the updater's own
+plist, which needs a manual re-run. Remember what this means: whoever can push to `main` runs code
 as root on the child's Mac. Fork it if you want to own that.
 
 Optional `/var/root/qustodio-guard/config.json`:
