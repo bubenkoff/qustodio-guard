@@ -28,9 +28,15 @@ On each run it:
 2. Asks Qustodio's cloud which profile watches that local account. Qustodio lists the accounts it
    monitors on every Mac as `{uid, name, profile}`.
 3. Reads that profile's rules (the daily quota and the allowed hours), today's screen time,
-   and any **extra time** granted from the parent app today. While a grant is running, nothing
-   is enforced. This matches Qustodio, which honours grants even outside the allowed hours.
-   The granted minutes are also added to the day's quota.
+   and any **extra time** granted from the parent app today.
+   - The quota follows Qustodio. It counts only if limits are on for weekdays or weekends.
+     A quota of 0 is Qustodio's *Block* (the whole day), unless every day is 0, which means
+     limits were never set. Screen time is the profile's total across its devices, which is
+     how Qustodio describes it: "all devices under one child profile share the same time limits".
+   - Extra time is added to the day's quota, as Qustodio documents it. In addition, and this
+     is our own choice, nothing is enforced for `duration` seconds from the moment of the
+     grant, even outside the allowed hours. Qustodio's docs do not say whether a grant beats
+     restricted hours, and a parent who grants time at 22:02 means for it to be used.
 4. If the quota is used up, or the current hour is outside the allowed hours, it warns the child
    with a dialog in their macOS language (English, Ukrainian, Dutch, German, Spanish, French;
    anything else falls back to English). After 60 seconds it ends that user's session, and only
@@ -93,6 +99,10 @@ Optional `/var/root/qustodio-guard/config.json`:
 
 ## Requirements and caveats
 
+- **Only "Restricted times" are read, not "Routines".** Accounts on older plans have
+  restricted times (`time_ranges`); newer plans use Routines, which this does not read yet.
+- **It always logs out**, which is Qustodio's *Lock device* on a Mac. With *Lock navigation*
+  only, Qustodio would just block browsing; the guard is stricter.
 - **The child's account must be a standard (non-admin) user.** Otherwise they can unload the
   daemon. The installer lists which accounts are which.
 - **The Qustodio API is unofficial.** It is the same API the Qustodio web app uses; the endpoints

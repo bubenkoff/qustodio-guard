@@ -136,7 +136,8 @@ function refresh(dir, cfg, st, kid, u, today) {
   }
   const rules = curl(dir, API + '/v1/accounts/' + kid.account_id + '/profiles/' + kid.profile_id + '/rules?app_rules=1', { bearer });
   const tr = rules.time_restrictions || {};
-  kid.rules = { time_ranges: tr.time_ranges || {}, quotas: tr.quotas || {} };
+  kid.rules = { time_ranges: tr.time_ranges || {}, quotas: tr.quotas || {},
+                weekdays_quota: tr.is_weekdays_quota !== false, weekend_quota: tr.is_weekend_quota !== false };
   const hourly = curl(dir, API + '/v2/accounts/' + kid.account_uid + '/profiles/' + kid.profile_uid +
                       '/summary_hourly?date=' + today, { bearer });
   kid.used_min = Math.round(hourly.reduce((a, e) => a + (e.screen_time_seconds || 0), 0) / 60);
@@ -175,10 +176,16 @@ function verdict(kid, now, today) {
   const day = DAYS[now.getDay()];
   const mask = kid.rules.time_ranges[day] || 0; // bit h set = hour h is blocked
   if (mask & (1 << now.getHours())) return { code: 'hours' };
-  const quota = (kid.rules.quotas[day] || 0) + (extra ? Math.round(extra.seconds / 60) : 0);
+  // A day's quota counts if limits are on for that kind of day. 0 is Qustodio's "Block" (the
+  // whole day) — unless every day is 0, which means no limits were ever set.
+  const weekend = day === 'sat' || day === 'sun';
+  const on = weekend ? kid.rules.weekend_quota !== false : kid.rules.weekdays_quota !== false;
+  const configured = Object.values(kid.rules.quotas).some(m => m > 0);
+  if (!on || !configured || !(day in kid.rules.quotas)) return null;
+  const quota = kid.rules.quotas[day] + (extra ? Math.round(extra.seconds / 60) : 0);
   const used = (kid.used_date === today ? kid.used_min : 0) +
                (kid.local_date === today ? Math.floor((kid.local_ms || 0) / 60e3) : 0);
-  if (kid.rules.quotas[day] > 0 && used >= quota) return { code: 'quota', used, quota };
+  if (used >= quota) return { code: 'quota', used, quota };
   return null;
 }
 function why(v, lang) { return v && fill((TEXTS[lang] || TEXTS.en)[v.code], v); }
@@ -219,7 +226,7 @@ function run(argv) {
   const save = () => writeFile(dir + '/state.json', JSON.stringify(st));
 
   const u = localUser();
-  if (u.uid === '0') return save();                                      // login window
+  if (Number(u.uid) < 501) return save();                     // login window, setup, system users
   if (cfg.user ? u.name !== cfg.user : u.admin && !dry) return save();   // parents are not guarded
 
   const kid = st.kids[u.uid] = st.kids[u.uid] || {};

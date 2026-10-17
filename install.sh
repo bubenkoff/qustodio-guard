@@ -40,7 +40,8 @@ if [[ ! -s $STATE/token ]]; then
   "$LIB/qustodio-token.sh" $STATE/token
 fi
 
-# daemon <label> <interval-seconds> <program> [args...] — (re)loads only if the plist changed
+# daemon <label> <interval-seconds> <program> [args...] — (re)loads only if the plist changed.
+# ThrottleInterval = interval: launchd's default of 10 s would otherwise cap the 5 s guard.
 daemon() {
   local label=$1 interval=$2; shift 2
   local plist=/Library/LaunchDaemons/$label.plist args= new
@@ -53,6 +54,7 @@ daemon() {
   <key>Label</key><string>$label</string>
   <key>ProgramArguments</key><array>$args</array>
   <key>StartInterval</key><integer>$interval</integer>
+  <key>ThrottleInterval</key><integer>$interval</integer>
   <key>RunAtLoad</key><true/>
   <key>StandardOutPath</key><string>$LOG</string>
   <key>StandardErrorPath</key><string>$LOG</string>
@@ -60,7 +62,7 @@ daemon() {
 </plist>
 PLIST
 )
-  if [[ -f $plist && $(<$plist) == $new ]] && /bin/launchctl print system/$label >/dev/null 2>&1; then
+  if [[ -f $plist && "$(<$plist)" == "$new" ]] && /bin/launchctl print system/$label >/dev/null 2>&1; then
     return
   fi
   print -r -- "$new" > $plist
