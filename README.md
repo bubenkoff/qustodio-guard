@@ -27,8 +27,17 @@ On each run it:
    are never guarded (an admin could remove the guard anyway).
 2. Asks Qustodio's cloud which profile watches that local account. Qustodio lists the accounts it
    monitors on every Mac as `{uid, name, profile}`.
-3. Reads that profile's rules (the daily quota and the allowed hours), today's screen time,
-   and any **extra time** granted from the parent app today.
+3. Reads that profile's rules (the daily quota and the allowed hours), its **Routines**, today's
+   screen time, and any **extra time** granted from the parent app today.
+   - Routines (Bedtime, School, Homework…) are the schedule. A routine whose policy blocks the
+     device (`block_type` 2, e.g. Bedtime) ends the session. A routine that does not count
+     towards the daily limit (`counts_towards_daily_time_quota: false`, e.g. School) suspends
+     the quota while it runs. Paused routines are ignored. "No internet" routines are left to
+     Qustodio, because the guard can only log out. Schedules are re-read every 5 minutes, and
+     those running past midnight are handled.
+   - Quota time is what Qustodio counts: time under the default rules plus time in routines
+     that count, not the raw screen-time total. On a school day those differ by hours.
+   - Without any routines, the older "Restricted times" (`time_ranges`) are used instead.
    - The quota follows Qustodio. It counts only if limits are on for weekdays or weekends.
      A quota of 0 is Qustodio's *Block* (the whole day), unless every day is 0, which means
      limits were never set. Screen time is the profile's total across its devices, which is
@@ -99,8 +108,8 @@ Optional `/var/root/qustodio-guard/config.json`:
 
 ## Requirements and caveats
 
-- **Only "Restricted times" are read, not "Routines".** Accounts on older plans have
-  restricted times (`time_ranges`); newer plans use Routines, which this does not read yet.
+- A routine's own app and website rules (e.g. "only these apps during Homework") are
+  Qustodio's to enforce. The guard only decides whether the session may continue at all.
 - **It always logs out**, which is Qustodio's *Lock device* on a Mac. With *Lock navigation*
   only, Qustodio would just block browsing; the guard is stricter.
 - **The child's account must be a standard (non-admin) user.** Otherwise they can unload the

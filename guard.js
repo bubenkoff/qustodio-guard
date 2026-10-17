@@ -24,21 +24,30 @@ const CLIENT_SECRET = '3e8826cbed3b996f8b206c7d6a4b2321529bc6bd';
 const DAYS = ['sun', 'mon', 'tue', 'wed', 'thr', 'fri', 'sat']; // Qustodio spells Thursday "thr"
 const MACOS = 1; // device.platform
 const REFRESH_MS = 60e3;  // API at most this often; screen time there lags minutes anyway
+const ROUTINES_MS = 5 * 60e3; // routines and their schedules: 1 + N calls, and they rarely change
+const WEEKDAYS = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA']; // routine schedules, by getDay()
+const BLOCK_DEVICE = 2;   // routine policy.block_type: 0 = rules only, 1 = no internet, 2 = device
 const TICK_GAP_MS = 30e3; // a longer gap between runs means the Mac slept: not screen time
 const IDLE_MS = 120e3;    // no keyboard/mouse for this long: away, not screen time
 // The warning dialog, in the kid's macOS language. config.json "lang" or "message" overrides.
 const TEXTS = {
-  en: { hours: 'outside allowed hours', quota: 'daily limit used ({used} of {quota} min)',
+  en: { routine: 'routine: {name} (device blocked)',
+        hours: 'outside allowed hours', quota: 'daily limit used ({used} of {quota} min)',
         text: "Time's up: {why}.\nSave your work — you will be logged out in {seconds} s." },
-  uk: { hours: 'поза дозволеними годинами', quota: 'денний ліміт вичерпано ({used} з {quota} хв)',
+  uk: { routine: 'розпорядок «{name}» (пристрій заблоковано)',
+        hours: 'поза дозволеними годинами', quota: 'денний ліміт вичерпано ({used} з {quota} хв)',
         text: 'Час вийшов: {why}.\nЗбережи роботу — через {seconds} с буде вихід із системи.' },
-  nl: { hours: 'buiten de toegestane uren', quota: 'daglimiet bereikt ({used} van {quota} min)',
+  nl: { routine: 'routine {name} (apparaat geblokkeerd)',
+        hours: 'buiten de toegestane uren', quota: 'daglimiet bereikt ({used} van {quota} min)',
         text: 'De tijd is om: {why}.\nSla je werk op — over {seconds} s word je uitgelogd.' },
-  de: { hours: 'außerhalb der erlaubten Zeiten', quota: 'Tageslimit erreicht ({used} von {quota} Min.)',
+  de: { routine: 'Routine {name} (Gerät gesperrt)',
+        hours: 'außerhalb der erlaubten Zeiten', quota: 'Tageslimit erreicht ({used} von {quota} Min.)',
         text: 'Die Zeit ist um: {why}.\nSpeichere deine Arbeit — in {seconds} s wirst du abgemeldet.' },
-  es: { hours: 'fuera del horario permitido', quota: 'límite diario agotado ({used} de {quota} min)',
+  es: { routine: 'rutina {name} (dispositivo bloqueado)',
+        hours: 'fuera del horario permitido', quota: 'límite diario agotado ({used} de {quota} min)',
         text: 'Se acabó el tiempo: {why}.\nGuarda tu trabajo: la sesión se cerrará en {seconds} s.' },
-  fr: { hours: 'en dehors des heures autorisées', quota: 'limite quotidienne atteinte ({used} sur {quota} min)',
+  fr: { routine: 'routine {name} (appareil bloqué)',
+        hours: 'en dehors des heures autorisées', quota: 'limite quotidienne atteinte ({used} sur {quota} min)',
         text: 'Le temps est écoulé : {why}.\nEnregistre ton travail — déconnexion dans {seconds} s.' },
 };
 function fill(t, v) { return t.replace(/\{(\w+)\}/g, (m, k) => (k in v ? v[k] : m)); }
@@ -140,7 +149,22 @@ function refresh(dir, cfg, st, kid, u, today) {
                 weekdays_quota: tr.is_weekdays_quota !== false, weekend_quota: tr.is_weekend_quota !== false };
   const hourly = curl(dir, API + '/v2/accounts/' + kid.account_uid + '/profiles/' + kid.profile_uid +
                       '/summary_hourly?date=' + today, { bearer });
-  kid.used_min = Math.round(hourly.reduce((a, e) => a + (e.screen_time_seconds || 0), 0) / 60);
+  // Routines: Qustodio's schedules (Bedtime, School…). A routine either blocks the device or
+  // swaps in its own rules, and its time counts towards the daily quota only if it says so.
+  if (!kid.routines_at || Date.now() - kid.routines_at >= ROUTINES_MS || kid.routines_on !== today) {
+    const base = API + '/v2/accounts/' + kid.account_uid + '/profiles/' + kid.profile_uid + '/routines';
+    kid.routines = (curl(dir, base + '?include_disabled=1', { bearer }).items_list || []).map(r => ({
+      uid: r.uid, name: r.name, on: r.enabled && !r.paused,
+      counts: !!(r.policy || {}).counts_towards_daily_time_quota, block: (r.policy || {}).block_type || 0,
+      schedules: r.enabled && !r.paused ? (curl(dir, base + '/' + r.uid + '/schedules', { bearer }).items_list || []) : [],
+    }));
+    kid.routines_at = Date.now();
+    kid.routines_on = today;
+  }
+  // Quota time = time under the default rules + time in routines that count towards it.
+  const counting = new Set(kid.routines.filter(r => r.counts).map(r => r.uid));
+  kid.used_min = Math.round(hourly.reduce((a, e) => a + (e.default_rules_screen_time || 0) +
+    (e.routines_screen_time || []).reduce((b, x) => b + (counting.has(x.uid) ? x.seconds : 0), 0), 0) / 60);
   // Extra time granted from the parent app: a window starting when it was granted, which
   // Qustodio honours even outside allowed hours. Re-read every poll — it changes any time.
   const ex = curl(dir, API + '/v2/accounts/' + kid.account_uid + '/profiles/' + kid.profile_uid +
@@ -150,6 +174,26 @@ function refresh(dir, cfg, st, kid, u, today) {
   kid.used_date = today;
   kid.local_ms = 0; // the cloud figure now covers everything up to here
   kid.local_date = today;
+}
+
+function ymd(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+// Routines running now. A schedule that started yesterday may run past midnight (Bedtime).
+function activeRoutines(kid, now) {
+  return (kid.routines || []).filter(r => r.on && r.schedules.some(s => {
+    if (s.enabled === false) return false;
+    for (const back of [0, 1]) {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - back);
+      if (!(s.weekdays || []).includes(WEEKDAYS[d.getDay()])) continue;
+      if ((s.from_date && ymd(d) < s.from_date) || (s.to_date && ymd(d) > s.to_date)) continue;
+      const [h, m, sec] = String(s.start_time).split(':').map(Number);
+      const start = new Date(d.getFullYear(), d.getMonth(), d.getDate(), h, m, sec || 0);
+      if (now >= start && now - start < s.duration_minutes * 60e3) return true;
+    }
+    return false;
+  }));
 }
 
 function idleMs() {
@@ -162,20 +206,30 @@ function idleMs() {
 function tick(kid, now, today) {
   if (kid.local_date !== today) { kid.local_ms = 0; kid.local_date = today; }
   const gap = kid.last_tick ? now - kid.last_tick : 0;
-  if (gap > 0 && gap < TICK_GAP_MS && idleMs() < IDLE_MS) kid.local_ms = (kid.local_ms || 0) + gap;
+  const free = activeRoutines(kid, now).some(r => r.block !== BLOCK_DEVICE && !r.counts); // not quota time
+  if (gap > 0 && gap < TICK_GAP_MS && !free && idleMs() < IDLE_MS) kid.local_ms = (kid.local_ms || 0) + gap;
   kid.last_tick = now.getTime();
 }
 
 // Why the session must end, or null. Works from cached state when the API is unreachable,
 // so switching Wi-Fi off once the limit is hit changes nothing.
-// Returns {code: 'hours'|'quota', used, quota}.
+// Returns {code: 'routine'|'hours'|'quota', name, used, quota}.
 function verdict(kid, now, today) {
   if (!kid.rules) return null;
   const extra = kid.used_date === today ? kid.extra : null;
   if (extra && now >= extra.start && now < extra.start + extra.seconds * 1000) return null; // granted time running
   const day = DAYS[now.getDay()];
-  const mask = kid.rules.time_ranges[day] || 0; // bit h set = hour h is blocked
-  if (mask & (1 << now.getHours())) return { code: 'hours' };
+  if (kid.routines && kid.routines.length) {
+    // With routines, they are the schedule; the legacy restricted-times mask is not used.
+    const active = activeRoutines(kid, now);
+    const blocking = active.find(r => r.block === BLOCK_DEVICE);
+    if (blocking) return { code: 'routine', name: blocking.name };
+    // "No internet" routines (block 1) are Qustodio's to enforce: the guard only logs out.
+    if (active.some(r => !r.counts)) return null; // e.g. School, Homework: outside the daily limit
+  } else {
+    const mask = kid.rules.time_ranges[day] || 0; // bit h set = hour h is blocked
+    if (mask & (1 << now.getHours())) return { code: 'hours' };
+  }
   // A day's quota counts if limits are on for that kind of day. 0 is Qustodio's "Block" (the
   // whole day) — unless every day is 0, which means no limits were ever set.
   const weekend = day === 'sat' || day === 'sun';
@@ -248,7 +302,8 @@ function run(argv) {
   const v = verdict(kid, now, today);
   if (dry) log('dry run for ' + u.name + ' → ' + (kid.profile_name || '?') + ': used ' + kid.used_min +
                ' min on ' + kid.used_date + ' + ' + Math.floor((kid.local_ms || 0) / 60e3) + ' local, extra ' + JSON.stringify(kid.extra || null) +
-               ', lang ' + kid.lang + ', verdict: ' + (why(v, 'en') || 'allowed') +
+               ', lang ' + kid.lang + ', routines now: ' + JSON.stringify(activeRoutines(kid, now).map(r => r.name)) +
+               ', verdict: ' + (why(v, 'en') || 'allowed') +
                (v ? '\n  dialog: ' + warning(cfg, kid, v, (cfg.grace_seconds || 60) * 1000) : ''));
   else enforce(cfg, kid, u, v, now);
   save();
