@@ -39,6 +39,14 @@ const VIDEO_FILE = /\.(mp4|m4v|mov|mkv|webm|avi|wmv|flv|mpe?g|ts|m2ts|3gp)$/i;
 // Apps that play video. Matched against lsof's full command name (helpers included); iMovie is
 // deliberately absent — making videos for school is not watching them.
 const PLAYERS = /(Chrome|Chromium|Brave|Edge|Opera|Safari|WebKit|Firefox|plugin-container|QuickTime|VLC|IINA|mpv|Elmedia|Movist|Infuse|^TV$)/;
+// Only these apps are ever closed for a routine's app list: anything installed in /Applications
+// or a home folder, plus Apple's own apps for watching and chatting. The rest of macOS (Siri,
+// Setup Assistant, panels, helpers, agents) is never touched, whatever the routine says:
+// closing Setup Assistant was seen live, and "kill everything not allowed" fights the OS.
+const APPLE_USER_APPS = /^com\.apple\.(quicktimeplayerx|mobilesms|facetime|tv|music|photobooth|podcasts|books|news|stocks|chess)$/;
+function enforceable(app) {
+  return /^\/(Applications|Users)\//.test(app.path || '') && !/^com\.apple\./.test(app.bundle) || APPLE_USER_APPS.test(app.bundle);
+}
 // Never closed, whatever a routine says: the desktop itself, Qustodio, and remote support.
 const ALWAYS_OK = /^(com\.apple\.(finder|dock|loginwindow|systemuiserver|controlcenter|notificationcenterui|spotlight|securityagent|coreservices\..*|screensaver.*|wifi\..*|universalaccess.*)|com\.qustodio\..*|com\.teamviewer\..*)$/;
 // Browsers are never closed for not being on a routine's app list: what they may open is the web
@@ -354,6 +362,7 @@ function runningApps(u) {
     name: (b.match(/^"([^"]*)"/) || [])[1],
     bundle: ((b.match(/bundleID="([^"]+)"/) || [])[1] || '').toLowerCase(),
     pid: (b.match(/\bpid = (\d+)/) || [])[1],
+    path: (b.match(/bundle path="([^"]+)"/) || [])[1],
     fg: /type="Foreground"/.test(b),
   })).filter(a => a.fg && a.bundle && a.pid);
 }
@@ -366,7 +375,7 @@ function routineApps(cfg, kid, u, now, routine) {
   kid.apps_checked_at = now.getTime();
   const lang = langOf(cfg, kid);
   for (const a of runningApps(u)) {
-    if (appAllowed(routine, kid, a.bundle)) continue;
+    if (!enforceable(a) || appAllowed(routine, kid, a.bundle)) continue;
     if (mode === 'log') { log('not allowed during ' + routine.name + ': ' + a.name + ' (' + a.bundle + '), log only'); continue; }
     strike(kid, 'app:' + a.bundle, now, YT_GRACE_MS,
       () => { log('not allowed during ' + routine.name + ': ' + a.name + ' (' + a.bundle + ')');
