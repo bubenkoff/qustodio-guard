@@ -32,7 +32,7 @@ const IDLE_MS = 120e3;    // no keyboard/mouse for this long: away, not screen t
 const ENTERTAINMENT = 6;  // Qustodio web category: YouTube and other video sites
 const YT_CHECK_MS = 30e3; // how often to look for offline YouTube playback
 const YT_MIN_CHUNKS = 3;  // offline chunks read in the last minute that mean "a video is playing"
-const YT_GRACE_MS = 15e3; // between the warning and closing the browser
+const YT_GRACE_MS = 60e3; // from the warning to closing an app, a tab or a video: time to wrap up
 const APPS_CHECK_MS = 10e3;  // how often to compare running apps with the routine's allow-list
 const VIDEO_CHECK_MS = 30e3; // how often to look for local video files open in players
 const VIDEO_FILE = /\.(mp4|m4v|mov|mkv|webm|avi|wmv|flv|mpe?g|ts|m2ts|3gp)$/i;
@@ -335,10 +335,19 @@ function verdict(kid, now, today) {
 }
 function why(v, lang) { return v && fill((TEXTS[lang] || TEXTS.en)[v.code], v); }
 
+// One warning on screen at a time, and it stays until the child clicks OK, so it cannot be missed
+// and does not pile up: while a guard dialog is still open, a new one is not shown (the event is
+// still logged and acted on). The marker in the command line is how an open one is recognised.
+const DIALOG_MARK = 'qustodio-guard-warning';
 function dialog(u, text, seconds) {
-  sh('/bin/launchctl asuser ' + u.uid + ' /usr/bin/sudo -u ' + q(u.name) + ' /usr/bin/osascript -e ' +
-     q('display dialog "' + text.replace(/["\\]/g, '\\$&') + '" buttons {"OK"} with icon caution giving up after ' +
-       Math.max(5, seconds - 5)) + ' >/dev/null 2>&1 &');
+  if (sh('/usr/bin/pgrep -u ' + u.uid + ' -f ' + q(DIALOG_MARK) + ' >/dev/null && echo open || true').trim()) {
+    log('warning not shown, one is already on screen: ' + text.split('\n')[0]);
+    return;
+  }
+  sh('/bin/launchctl asuser ' + u.uid + ' /usr/bin/sudo -u ' + q(u.name) + ' /usr/bin/osascript' +
+     ' -e ' + q('-- ' + DIALOG_MARK) +
+     ' -e ' + q('display dialog "' + text.replace(/["\\]/g, '\\$&') + '" buttons {"OK"} default button "OK" with icon caution') +
+     ' >/dev/null 2>&1 &');
 }
 
 // Warn once, close after `graceMs`; within 30 min of a warning, close straight away.
