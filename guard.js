@@ -41,6 +41,10 @@ const VIDEO_FILE = /\.(mp4|m4v|mov|mkv|webm|avi|wmv|flv|mpe?g|ts|m2ts|3gp)$/i;
 const PLAYERS = /(Chrome|Chromium|Brave|Edge|Opera|Safari|WebKit|Firefox|plugin-container|QuickTime|VLC|IINA|mpv|Elmedia|Movist|Infuse|^TV$)/;
 // Never closed, whatever a routine says: the desktop itself, Qustodio, and remote support.
 const ALWAYS_OK = /^(com\.apple\.(finder|dock|loginwindow|systemuiserver|controlcenter|notificationcenterui|spotlight|securityagent|coreservices\..*|screensaver.*|wifi\..*|universalaccess.*)|com\.qustodio\..*|com\.teamviewer\..*)$/;
+// Browsers are never closed for not being on a routine's app list: what they may open is the web
+// rules' business, and offline YouTube and local video are caught separately. A routine that
+// forgot to allow a browser would otherwise take school away with it.
+const BROWSER_APPS = /^(com\.google\.chrome(\.beta|\.canary)?|com\.apple\.safari|com\.operasoftware\.opera.*|com\.brave\.browser.*|com\.microsoft\.edgemac.*|org\.mozilla\.firefox.*|org\.chromium\.chromium)$/;
 // Browsers whose YouTube Premium offline downloads live in <profile>/IndexedDB, and their processes.
 const BROWSERS = [
   ['Google/Chrome', 'Google Chrome'], ['BraveSoftware/Brave-Browser', 'Brave Browser'],
@@ -238,7 +242,7 @@ function appRules(ar) {
 // Would Qustodio let this app run during the routine? action: 0 = allow, 1 = block.
 function appAllowed(routine, kid, bundle) {
   const r = routine.apps;
-  if (!r || ALWAYS_OK.test(bundle)) return true;
+  if (!r || ALWAYS_OK.test(bundle) || BROWSER_APPS.test(bundle)) return true;
   const known = (kid.catalog || {})[bundle];
   if (known && !known.blockable) return true;
   if (bundle in r.apps) return r.apps[bundle] === 0;
@@ -321,11 +325,13 @@ function dialog(u, text, seconds) {
 }
 
 // Warn once, close after `graceMs`; within 30 min of a warning, close straight away.
+// Timed by the clock, not by the run's start: a run that waited on the API must not shorten
+// the grace the child actually sees.
 function strike(kid, key, now, graceMs, warn, close) {
   kid.strikes = kid.strikes || {};
-  const at = kid.strikes[key];
-  if (!at || now - at > 30 * 60e3) { kid.strikes[key] = now.getTime(); warn(); }
-  else if (now - at >= graceMs) close();
+  const at = kid.strikes[key], t = Date.now();
+  if (!at || t - at > 30 * 60e3) { warn(); kid.strikes[key] = Date.now(); }
+  else if (t - at >= graceMs) close();
 }
 
 function langOf(cfg, kid) { return TEXTS[cfg.lang] ? cfg.lang : TEXTS[kid.lang] ? kid.lang : 'en'; }

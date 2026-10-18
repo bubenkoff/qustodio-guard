@@ -59,7 +59,9 @@ while a routine runs, the guard compares the child's foreground apps (`lsappinfo
 routine's Mac app rules: apps allowed by name or by category (Qustodio's catalogue gives each
 app's bundle id and category), and the routine's default. Anything not allowed gets a warning
 and is closed 15 s later. The Finder and the rest of the desktop, Qustodio itself, TeamViewer,
-and apps Qustodio marks unblockable are never touched. Apps Qustodio has never seen fall to the
+apps Qustodio marks unblockable, and **browsers** are never touched. Browsers are exempt because
+the web rules decide what they may open, and a routine that forgot to allow one would otherwise
+take school away with it. Apps Qustodio has never seen fall to the
 routine's default, as they would in Qustodio, so add a new school app to the routine's
 allow-list. `"routine_apps": "log"` or `"off"` in `config.json`.
 
