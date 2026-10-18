@@ -54,6 +54,22 @@ On each run it:
 
 It polls rather than reacting to an unlock event, so there is no event to race.
 
+**Routine app rules.** When the agent is beaten, Qustodio's app blocking goes down with it. So
+while a routine runs, the guard compares the child's foreground apps (`lsappinfo`) with the
+routine's Mac app rules: apps allowed by name or by category (Qustodio's catalogue gives each
+app's bundle id and category), and the routine's default. Anything not allowed gets a warning
+and is closed 15 s later. The Finder and the rest of the desktop, Qustodio itself, TeamViewer,
+and apps Qustodio marks unblockable are never touched. Apps Qustodio has never seen fall to the
+routine's default, as they would in Qustodio, so add a new school app to the routine's
+allow-list. `"routine_apps": "log"` or `"off"` in `config.json`.
+
+**Local video.** Films and clips played from disk (a browser via `file://`, QuickTime, VLC,
+IINA…) are invisible to Qustodio as well. During a routine that blocks Entertainment, the guard
+checks every 30 s with `lsof` for a video file open *for reading* by a player. If it finds one,
+it warns and then closes that player. iMovie is deliberately not a player: making a video for
+school is not watching one. Recording, which writes, does not count, and neither do videos
+inside app bundles. `"local_video": "log"` or `"off"`.
+
 **Offline YouTube.** YouTube Premium can download videos into the browser's own storage and play
 them with no network request, so Qustodio's web filter never sees them. A child can download in
 free time and watch during a routine that blocks Entertainment (e.g. Homework). While such a
@@ -111,7 +127,8 @@ as root on the child's Mac. Fork it if you want to own that.
 Optional `/var/root/qustodio-guard/config.json`:
 
 ```json
-{ "profile": "Alex", "user": "alex", "grace_seconds": 60, "lang": "uk", "offline_youtube": "block",
+{ "profile": "Alex", "user": "alex", "grace_seconds": 60, "lang": "uk",
+  "offline_youtube": "block", "routine_apps": "block", "local_video": "block",
   "message": "Time's up: {why}.\nSave your work — you will be logged out in {seconds} s." }
 ```
 

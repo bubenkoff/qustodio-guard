@@ -33,6 +33,14 @@ const ENTERTAINMENT = 6;  // Qustodio web category: YouTube and other video site
 const YT_CHECK_MS = 30e3; // how often to look for offline YouTube playback
 const YT_MIN_CHUNKS = 3;  // offline chunks read in the last minute that mean "a video is playing"
 const YT_GRACE_MS = 15e3; // between the warning and closing the browser
+const APPS_CHECK_MS = 10e3;  // how often to compare running apps with the routine's allow-list
+const VIDEO_CHECK_MS = 30e3; // how often to look for local video files open in players
+const VIDEO_FILE = /\.(mp4|m4v|mov|mkv|webm|avi|wmv|flv|mpe?g|ts|m2ts|3gp)$/i;
+// Apps that play video. Matched against lsof's full command name (helpers included); iMovie is
+// deliberately absent — making videos for school is not watching them.
+const PLAYERS = /(Chrome|Chromium|Brave|Edge|Opera|Safari|WebKit|Firefox|plugin-container|QuickTime|VLC|IINA|mpv|Elmedia|Movist|Infuse|^TV$)/;
+// Never closed, whatever a routine says: the desktop itself, Qustodio, and remote support.
+const ALWAYS_OK = /^(com\.apple\.(finder|dock|loginwindow|systemuiserver|controlcenter|notificationcenterui|spotlight|securityagent|coreservices\..*|screensaver.*|wifi\..*|universalaccess.*)|com\.qustodio\..*|com\.teamviewer\..*)$/;
 // Browsers whose YouTube Premium offline downloads live in <profile>/IndexedDB, and their processes.
 const BROWSERS = [
   ['Google/Chrome', 'Google Chrome'], ['BraveSoftware/Brave-Browser', 'Brave Browser'],
@@ -40,27 +48,39 @@ const BROWSERS = [
 ];
 // The warning dialog, in the kid's macOS language. config.json "lang" or "message" overrides.
 const TEXTS = {
-  en: { offline: 'Offline YouTube isn\'t allowed during {name}.\nThe browser will close in {seconds} s.',
+  en: { app: '{app} isn\'t allowed during {name}.\nIt will close in {seconds} s.',
+        video: 'Watching downloaded videos isn\'t allowed during {name}.\n{app} will close in {seconds} s.',
+        offline: 'Offline YouTube isn\'t allowed during {name}.\nThe browser will close in {seconds} s.',
         routine: 'routine: {name} (device blocked)',
         hours: 'outside allowed hours', quota: 'daily limit used ({used} of {quota} min)',
         text: "Time's up: {why}.\nSave your work — you will be logged out in {seconds} s." },
-  uk: { offline: 'Офлайн-YouTube під час «{name}» не можна.\nБраузер закриється через {seconds} с.',
+  uk: { app: '{app} під час «{name}» не можна.\nЗастосунок закриється через {seconds} с.',
+        video: 'Дивитися завантажені відео під час «{name}» не можна.\n{app} закриється через {seconds} с.',
+        offline: 'Офлайн-YouTube під час «{name}» не можна.\nБраузер закриється через {seconds} с.',
         routine: 'розпорядок «{name}» (пристрій заблоковано)',
         hours: 'поза дозволеними годинами', quota: 'денний ліміт вичерпано ({used} з {quota} хв)',
         text: 'Час вийшов: {why}.\nЗбережи роботу — через {seconds} с буде вихід із системи.' },
-  nl: { offline: 'Offline YouTube is niet toegestaan tijdens {name}.\nDe browser sluit over {seconds} s.',
+  nl: { app: '{app} is niet toegestaan tijdens {name}.\nDe app sluit over {seconds} s.',
+        video: 'Gedownloade video\'s kijken is niet toegestaan tijdens {name}.\n{app} sluit over {seconds} s.',
+        offline: 'Offline YouTube is niet toegestaan tijdens {name}.\nDe browser sluit over {seconds} s.',
         routine: 'routine {name} (apparaat geblokkeerd)',
         hours: 'buiten de toegestane uren', quota: 'daglimiet bereikt ({used} van {quota} min)',
         text: 'De tijd is om: {why}.\nSla je werk op — over {seconds} s word je uitgelogd.' },
-  de: { offline: 'Offline-YouTube ist während {name} nicht erlaubt.\nDer Browser wird in {seconds} s geschlossen.',
+  de: { app: '{app} ist während {name} nicht erlaubt.\nDie App wird in {seconds} s geschlossen.',
+        video: 'Heruntergeladene Videos sind während {name} nicht erlaubt.\n{app} wird in {seconds} s geschlossen.',
+        offline: 'Offline-YouTube ist während {name} nicht erlaubt.\nDer Browser wird in {seconds} s geschlossen.',
         routine: 'Routine {name} (Gerät gesperrt)',
         hours: 'außerhalb der erlaubten Zeiten', quota: 'Tageslimit erreicht ({used} von {quota} Min.)',
         text: 'Die Zeit ist um: {why}.\nSpeichere deine Arbeit — in {seconds} s wirst du abgemeldet.' },
-  es: { offline: 'YouTube sin conexión no está permitido durante {name}.\nEl navegador se cerrará en {seconds} s.',
+  es: { app: '{app} no está permitido durante {name}.\nSe cerrará en {seconds} s.',
+        video: 'Ver vídeos descargados no está permitido durante {name}.\n{app} se cerrará en {seconds} s.',
+        offline: 'YouTube sin conexión no está permitido durante {name}.\nEl navegador se cerrará en {seconds} s.',
         routine: 'rutina {name} (dispositivo bloqueado)',
         hours: 'fuera del horario permitido', quota: 'límite diario agotado ({used} de {quota} min)',
         text: 'Se acabó el tiempo: {why}.\nGuarda tu trabajo: la sesión se cerrará en {seconds} s.' },
-  fr: { offline: 'YouTube hors ligne n\'est pas autorisé pendant {name}.\nLe navigateur se fermera dans {seconds} s.',
+  fr: { app: '{app} n\'est pas autorisé pendant {name}.\nL\'app se fermera dans {seconds} s.',
+        video: 'Regarder des vidéos téléchargées n\'est pas autorisé pendant {name}.\n{app} se fermera dans {seconds} s.',
+        offline: 'YouTube hors ligne n\'est pas autorisé pendant {name}.\nLe navigateur se fermera dans {seconds} s.',
         routine: 'routine {name} (appareil bloqué)',
         hours: 'en dehors des heures autorisées', quota: 'limite quotidienne atteinte ({used} sur {quota} min)',
         text: 'Le temps est écoulé : {why}.\nEnregistre ton travail — déconnexion dans {seconds} s.' },
@@ -160,6 +180,10 @@ function refresh(dir, cfg, st, kid, u, today) {
   }
   const rules = curl(dir, API + '/v1/accounts/' + kid.account_id + '/profiles/' + kid.profile_id + '/rules?app_rules=1', { bearer });
   const tr = rules.time_restrictions || {};
+  // Qustodio's catalogue of this child's Mac apps: bundle id → category, and whether it can be blocked.
+  kid.catalog = {};
+  for (const a of (rules.app_rules || {}).application_list || [])
+    if (a.platform === MACOS && a.exe) kid.catalog[a.exe.toLowerCase()] = { cat: a.category_id, blockable: a.blockable !== false, name: a.name };
   kid.rules = { time_ranges: tr.time_ranges || {}, quotas: tr.quotas || {},
                 weekdays_quota: tr.is_weekdays_quota !== false, weekend_quota: tr.is_weekend_quota !== false };
   const hourly = curl(dir, API + '/v2/accounts/' + kid.account_uid + '/profiles/' + kid.profile_uid +
@@ -172,6 +196,7 @@ function refresh(dir, cfg, st, kid, u, today) {
       uid: r.uid, name: r.name, on: r.enabled && !r.paused,
       counts: !!(r.policy || {}).counts_towards_daily_time_quota, block: (r.policy || {}).block_type || 0,
       noVideo: entertainmentBlocked((r.policy || {}).web_rules),
+      apps: appRules((r.policy || {}).app_rules),
       schedules: r.enabled && !r.paused ? (curl(dir, base + '/' + r.uid + '/schedules', { bearer }).items_list || []) : [],
     }));
     kid.routines_at = Date.now();
@@ -198,6 +223,27 @@ function entertainmentBlocked(web) {
   if (!web) return false;
   const rule = (web.web_rules_list || []).find(w => w.category === ENTERTAINMENT);
   return web.default_action === 1 ? !(rule && rule.action === 0) : !!(rule && rule.action === 1);
+}
+
+// A routine's app policy, Mac part only: default action, per-app and per-category rules.
+function appRules(ar) {
+  if (!ar) return null;
+  const apps = {};
+  for (const a of ar.app_rules_list || []) if (a.platform === MACOS && a.exe) apps[a.exe.toLowerCase()] = a.action;
+  const cats = {};
+  for (const c of ar.app_category_rules_list || []) cats[c.category_id] = c.action;
+  return { def: ar.default_action || 0, apps, cats };
+}
+
+// Would Qustodio let this app run during the routine? action: 0 = allow, 1 = block.
+function appAllowed(routine, kid, bundle) {
+  const r = routine.apps;
+  if (!r || ALWAYS_OK.test(bundle)) return true;
+  const known = (kid.catalog || {})[bundle];
+  if (known && !known.blockable) return true;
+  if (bundle in r.apps) return r.apps[bundle] === 0;
+  if (known && known.cat in r.cats) return r.cats[known.cat] === 0;
+  return r.def === 0;
 }
 
 function ymd(d) {
@@ -274,6 +320,82 @@ function dialog(u, text, seconds) {
        Math.max(5, seconds - 5)) + ' >/dev/null 2>&1 &');
 }
 
+// Warn once, close after `graceMs`; within 30 min of a warning, close straight away.
+function strike(kid, key, now, graceMs, warn, close) {
+  kid.strikes = kid.strikes || {};
+  const at = kid.strikes[key];
+  if (!at || now - at > 30 * 60e3) { kid.strikes[key] = now.getTime(); warn(); }
+  else if (now - at >= graceMs) close();
+}
+
+function langOf(cfg, kid) { return TEXTS[cfg.lang] ? cfg.lang : TEXTS[kid.lang] ? kid.lang : 'en'; }
+
+function quit(u, proc) { sh('/usr/bin/pkill -TERM -u ' + u.uid + ' -x ' + q(proc) + ' || true'); }
+
+// Foreground apps in the child's session: [{name, bundle, pid}].
+function runningApps(u) {
+  const out = sh('/bin/launchctl asuser ' + u.uid + ' /usr/bin/lsappinfo list 2>/dev/null || true');
+  return out.split(/\n\s*\d+\) /).map(b => ({
+    name: (b.match(/^"([^"]*)"/) || [])[1],
+    bundle: ((b.match(/bundleID="([^"]+)"/) || [])[1] || '').toLowerCase(),
+    pid: (b.match(/\bpid = (\d+)/) || [])[1],
+    fg: /type="Foreground"/.test(b),
+  })).filter(a => a.fg && a.bundle && a.pid);
+}
+
+// Qustodio's app blocking goes down with its agent, so enforce the routine's allow-list here.
+function routineApps(cfg, kid, u, now, routine) {
+  const mode = cfg.routine_apps || 'block';
+  if (mode === 'off' || !routine.apps) return;
+  if (kid.apps_checked_at && now - kid.apps_checked_at < APPS_CHECK_MS) return;
+  kid.apps_checked_at = now.getTime();
+  const lang = langOf(cfg, kid);
+  for (const a of runningApps(u)) {
+    if (appAllowed(routine, kid, a.bundle)) continue;
+    if (mode === 'log') { log('not allowed during ' + routine.name + ': ' + a.name + ' (' + a.bundle + '), log only'); continue; }
+    strike(kid, 'app:' + a.bundle, now, YT_GRACE_MS,
+      () => { log('not allowed during ' + routine.name + ': ' + a.name + ' (' + a.bundle + ')');
+              dialog(u, fill(TEXTS[lang].app, { app: a.name, name: routine.name, seconds: YT_GRACE_MS / 1000 }), YT_GRACE_MS / 1000); },
+      () => { log('closing ' + a.name + ' (' + a.bundle + '): not allowed during ' + routine.name);
+              sh('/bin/kill -TERM ' + a.pid + ' 2>/dev/null || true'); });
+  }
+}
+
+// The app to close for a process that has a video open: browsers by their main process.
+function playerApp(cmd) {
+  for (const [re, app] of [[/Chrome/, 'Google Chrome'], [/Brave/, 'Brave Browser'], [/Edge/, 'Microsoft Edge'],
+                           [/Opera/, 'Opera'], [/WebKit|Safari/, 'Safari'], [/Firefox|plugin-container/, 'firefox']])
+    if (re.test(cmd)) return app;
+  return cmd;
+}
+
+// Downloaded films and clips played from disk — in a browser via file://, QuickTime, VLC… —
+// are invisible to Qustodio too. Files open for reading only (recording writes), outside apps.
+function localVideo(cfg, kid, u, now, routine) {
+  const mode = cfg.local_video || 'block';
+  if (mode === 'off' || !routine.noVideo) return;
+  if (kid.video_checked_at && now - kid.video_checked_at < VIDEO_CHECK_MS) return;
+  kid.video_checked_at = now.getTime();
+  const out = sh('/usr/sbin/lsof -nP +c 0 -u ' + u.uid + ' -Fcan 2>/dev/null || true');
+  const hits = {};
+  let cmd = '', mode_ = '';
+  for (const line of out.split('\n')) {
+    const t = line[0], v = line.slice(1);
+    if (t === 'c') cmd = v;
+    else if (t === 'a') mode_ = v;
+    else if (t === 'n' && mode_ === 'r' && PLAYERS.test(cmd) && VIDEO_FILE.test(v) &&
+             /^\/(Users|Volumes)\//.test(v) && !/\.app\//.test(v)) hits[playerApp(cmd)] = v;
+  }
+  const lang = langOf(cfg, kid);
+  for (const [app, file] of Object.entries(hits)) {
+    log('local video during ' + routine.name + ' in ' + app + ': ' + file.split('/').pop() + (mode === 'log' ? ' (log only)' : ''));
+    if (mode === 'log') continue;
+    strike(kid, 'video:' + app, now, YT_GRACE_MS,
+      () => dialog(u, fill(TEXTS[lang].video, { app, name: routine.name, seconds: YT_GRACE_MS / 1000 }), YT_GRACE_MS / 1000),
+      () => { log('closing ' + app + ' (local video during ' + routine.name + ')'); quit(u, app); });
+  }
+}
+
 // YouTube Premium lets a browser download videos into the site's own storage and play them with no
 // network request, so Qustodio's web filter never sees them. While a routine that blocks
 // Entertainment runs (Homework…), a browser reading those files means a video is playing:
@@ -282,7 +404,7 @@ function dialog(u, text, seconds) {
 function offlineYouTube(cfg, kid, u, now) {
   const mode = cfg.offline_youtube || 'block';
   const routine = mode !== 'off' && activeRoutines(kid, now).find(r => r.noVideo && r.block !== BLOCK_DEVICE);
-  if (!routine) { kid.yt_warned_at = null; return; }
+  if (!routine) return;
   if (kid.yt_checked_at && now - kid.yt_checked_at < YT_CHECK_MS) return;
   kid.yt_checked_at = now.getTime();
   if (!kid.yt_dirs || kid.yt_dirs_on !== ymd(now)) {
@@ -299,14 +421,11 @@ function offlineYouTube(cfg, kid, u, now) {
   log('offline YouTube during ' + routine.name + ': ' + chunks + ' chunks read in the last minute' +
       (mode === 'log' ? ' (log only)' : ''));
   if (mode === 'log') return;
-  const lang = TEXTS[cfg.lang] ? cfg.lang : TEXTS[kid.lang] ? kid.lang : 'en';
-  if (!kid.yt_warned_at || now - kid.yt_warned_at > 30 * 60e3) {
-    kid.yt_warned_at = now.getTime();
-    dialog(u, fill(TEXTS[lang].offline, { name: routine.name, seconds: YT_GRACE_MS / 1000 }), YT_GRACE_MS / 1000);
-  } else if (now - kid.yt_warned_at >= YT_GRACE_MS) {
-    log('closing browsers of ' + u.name + ' (offline YouTube during ' + routine.name + ')');
-    for (const [, proc] of BROWSERS) sh('/usr/bin/pkill -TERM -u ' + u.uid + ' -x ' + q(proc) + ' || true');
-  }
+  const lang = langOf(cfg, kid);
+  strike(kid, 'offline-youtube', now, YT_GRACE_MS,
+    () => dialog(u, fill(TEXTS[lang].offline, { name: routine.name, seconds: YT_GRACE_MS / 1000 }), YT_GRACE_MS / 1000),
+    () => { log('closing browsers of ' + u.name + ' (offline YouTube during ' + routine.name + ')');
+            for (const [, proc] of BROWSERS) quit(u, proc); });
 }
 
 function warning(cfg, kid, v, grace) {
@@ -369,7 +488,11 @@ function run(argv) {
                (v ? '\n  dialog: ' + warning(cfg, kid, v, (cfg.grace_seconds || 60) * 1000) : ''));
   else {
     enforce(cfg, kid, u, v, now);
-    if (!v) offlineYouTube(cfg, kid, u, now);
+    if (!v) {
+      offlineYouTube(cfg, kid, u, now);
+      const routine = activeRoutines(kid, now).find(r => r.block !== BLOCK_DEVICE && (r.apps || r.noVideo));
+      if (routine) { routineApps(cfg, kid, u, now, routine); localVideo(cfg, kid, u, now, routine); }
+    }
   }
   save();
 }
