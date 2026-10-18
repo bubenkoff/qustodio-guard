@@ -533,10 +533,8 @@ function heartbeat(u, now, today) {
   const st = CTX.st;
   if (st.hb_at && now - st.hb_at < HEARTBEAT_MS) return;
   st.hb_at = now.getTime();
-  if (!st.version_on || st.version_on !== today) {
-    st.version = sh('/usr/bin/shasum ' + q('/Library/Application Support/qustodio-guard/guard.js') + ' 2>/dev/null || true').slice(0, 12) || '?';
-    st.version_on = today;
-  }
+  // Every heartbeat: the self-updater can replace guard.js at any time.
+  st.version = sh('/usr/bin/shasum ' + q('/Library/Application Support/qustodio-guard/guard.js') + ' 2>/dev/null || true').slice(0, 12) || '?';
   const kids = Object.values(st.kids).filter(k => k.profile_name);
   for (const k of kids.length ? kids : [{}]) {
     const day = DAYS[now.getDay()];
