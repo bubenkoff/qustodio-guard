@@ -4,7 +4,7 @@
 #
 # The guard (https://github.com/bubenkoff/qustodio-guard) logs a child out when Qustodio says their time is up, enforces routines' app
 # rules, and stops offline/downloaded video during routines that block Entertainment. It POSTs
-# JSON to a local-only webhook:
+# JSON to a webhook:
 #   {host, kid, event: heartbeat|alert|resolved|action, key, message, status: {...}}
 # - heartbeat: every 15 min while the Mac is awake -> sensor.qustodio_guard_<kid>
 # - alert / resolved: it cannot do its job (API down for hours, login rejected, no access to
@@ -25,7 +25,7 @@ automation:
       - trigger: webhook
         webhook_id: !secret qustodio_guard_webhook
         allowed_methods: [POST]
-        local_only: true
+        local_only: false  # lets a Mac away from home report via HA's external URL; the long random id is the secret
     actions:
       - event: qustodio_guard_report
         event_data:

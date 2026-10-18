@@ -1,7 +1,8 @@
 #!/bin/zsh
 # Install qustodio-guard on a kid's Mac. Run from a parent (admin) account:
 #
-#   sudo ./install.sh [--profile <Qustodio profile name>] [--ha-webhook <Home Assistant webhook URL>]
+#   sudo ./install.sh [--profile <Qustodio profile name>] [--ha-webhook <local HA webhook URL>]
+#                     [--ha-webhook-external <the same webhook via HA's external URL>]
 #
 # Without --profile, the guard works out which Qustodio profile watches whoever is at the
 # screen from Qustodio's own device list, and leaves admin accounts alone. Re-running is safe:
@@ -11,12 +12,13 @@ set -eu
 [[ $EUID -eq 0 ]] || { echo "run with sudo" >&2; exit 1; }
 here=${0:A:h}
 
-profile= webhook=
+profile= webhook= webhook_ext=
 while (( $# )); do
   case $1 in
     --profile) profile=${2:?}; shift 2 ;;
     --ha-webhook) webhook=${2:?}; shift 2 ;;
-    *) echo "usage: sudo $0 [--profile <name>] [--ha-webhook <url>]" >&2; exit 1 ;;
+    --ha-webhook-external) webhook_ext=${2:?}; shift 2 ;;
+    *) echo "usage: sudo $0 [--profile <name>] [--ha-webhook <url>] [--ha-webhook-external <url>]" >&2; exit 1 ;;
   esac
 done
 
@@ -48,6 +50,7 @@ setcfg() {
 }
 [[ -z $profile ]] || setcfg profile "$profile"
 [[ -z $webhook ]] || setcfg ha_webhook "$webhook"
+[[ -z $webhook_ext ]] || setcfg ha_webhook_external "$webhook_ext"
 if [[ ! -s $STATE/token ]]; then
   [[ -z ${QG_FROM_UPDATE:-} ]] || { echo "no Qustodio token; run install.sh by hand" >&2; exit 1; }
   "$LIB/qustodio-token.sh" $STATE/token

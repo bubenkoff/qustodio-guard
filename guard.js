@@ -483,16 +483,22 @@ const ALERT_REPEAT_MS = 12 * 3600e3;
 const API_ALERT_FAILS = 180; // ~3 h of failed polls (one a minute)
 const CTX = {};              // dir, cfg, st, host — set by run()
 function setContext(o) { Object.assign(CTX, o); }
-function reporting() { return !!(CTX.cfg && CTX.cfg.ha_webhook && CTX.st && CTX.dir); }
+// The external URL first: it works at home and away, and a foreign network (school) may well
+// have its own 192.168.x host at the local URL's address. The local URL is the fallback for when
+// the home internet is down.
+function webhooks() { return CTX.cfg ? [].concat(CTX.cfg.ha_webhook_external || [], CTX.cfg.ha_webhook || []) : []; }
+function reporting() { return !!(webhooks().length && CTX.st && CTX.dir); }
 
 function post(payload) {
   if (!reporting()) return true;
   const body = CTX.dir + '/report.json', cfgf = CTX.dir + '/report.cfg';
   writeFile(body, JSON.stringify(Object.assign({ host: CTX.host }, payload)));
-  writeFile(cfgf, ['url = "' + CTX.cfg.ha_webhook + '"', 'silent', 'fail', 'max-time = 8',
-                   'header = "Content-Type: application/json"', 'data-binary = "@' + body + '"'].join('\n') + '\n');
-  try { sh('/usr/bin/curl -K ' + q(cfgf) + ' -o /dev/null'); return true; }
-  catch (e) { return false; }
+  for (const url of webhooks()) {
+    writeFile(cfgf, ['url = "' + url + '"', 'silent', 'fail', 'connect-timeout = 4', 'max-time = 8',
+                     'header = "Content-Type: application/json"', 'data-binary = "@' + body + '"'].join('\n') + '\n');
+    try { sh('/usr/bin/curl -K ' + q(cfgf) + ' -o /dev/null'); return true; } catch (e) { /* next URL */ }
+  }
+  return false;
 }
 
 // Alerts and actions are queued while HA is unreachable (the Mac at school), heartbeats are not.
