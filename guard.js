@@ -29,24 +29,39 @@ const WEEKDAYS = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA']; // routine schedule
 const BLOCK_DEVICE = 2;   // routine policy.block_type: 0 = rules only, 1 = no internet, 2 = device
 const TICK_GAP_MS = 30e3; // a longer gap between runs means the Mac slept: not screen time
 const IDLE_MS = 120e3;    // no keyboard/mouse for this long: away, not screen time
+const ENTERTAINMENT = 6;  // Qustodio web category: YouTube and other video sites
+const YT_CHECK_MS = 30e3; // how often to look for offline YouTube playback
+const YT_MIN_CHUNKS = 3;  // offline chunks read in the last minute that mean "a video is playing"
+const YT_GRACE_MS = 15e3; // between the warning and closing the browser
+// Browsers whose YouTube Premium offline downloads live in <profile>/IndexedDB, and their processes.
+const BROWSERS = [
+  ['Google/Chrome', 'Google Chrome'], ['BraveSoftware/Brave-Browser', 'Brave Browser'],
+  ['Microsoft Edge', 'Microsoft Edge'], ['com.operasoftware.Opera', 'Opera'],
+];
 // The warning dialog, in the kid's macOS language. config.json "lang" or "message" overrides.
 const TEXTS = {
-  en: { routine: 'routine: {name} (device blocked)',
+  en: { offline: 'Offline YouTube isn\'t allowed during {name}.\nThe browser will close in {seconds} s.',
+        routine: 'routine: {name} (device blocked)',
         hours: 'outside allowed hours', quota: 'daily limit used ({used} of {quota} min)',
         text: "Time's up: {why}.\nSave your work — you will be logged out in {seconds} s." },
-  uk: { routine: 'розпорядок «{name}» (пристрій заблоковано)',
+  uk: { offline: 'Офлайн-YouTube під час «{name}» не можна.\nБраузер закриється через {seconds} с.',
+        routine: 'розпорядок «{name}» (пристрій заблоковано)',
         hours: 'поза дозволеними годинами', quota: 'денний ліміт вичерпано ({used} з {quota} хв)',
         text: 'Час вийшов: {why}.\nЗбережи роботу — через {seconds} с буде вихід із системи.' },
-  nl: { routine: 'routine {name} (apparaat geblokkeerd)',
+  nl: { offline: 'Offline YouTube is niet toegestaan tijdens {name}.\nDe browser sluit over {seconds} s.',
+        routine: 'routine {name} (apparaat geblokkeerd)',
         hours: 'buiten de toegestane uren', quota: 'daglimiet bereikt ({used} van {quota} min)',
         text: 'De tijd is om: {why}.\nSla je werk op — over {seconds} s word je uitgelogd.' },
-  de: { routine: 'Routine {name} (Gerät gesperrt)',
+  de: { offline: 'Offline-YouTube ist während {name} nicht erlaubt.\nDer Browser wird in {seconds} s geschlossen.',
+        routine: 'Routine {name} (Gerät gesperrt)',
         hours: 'außerhalb der erlaubten Zeiten', quota: 'Tageslimit erreicht ({used} von {quota} Min.)',
         text: 'Die Zeit ist um: {why}.\nSpeichere deine Arbeit — in {seconds} s wirst du abgemeldet.' },
-  es: { routine: 'rutina {name} (dispositivo bloqueado)',
+  es: { offline: 'YouTube sin conexión no está permitido durante {name}.\nEl navegador se cerrará en {seconds} s.',
+        routine: 'rutina {name} (dispositivo bloqueado)',
         hours: 'fuera del horario permitido', quota: 'límite diario agotado ({used} de {quota} min)',
         text: 'Se acabó el tiempo: {why}.\nGuarda tu trabajo: la sesión se cerrará en {seconds} s.' },
-  fr: { routine: 'routine {name} (appareil bloqué)',
+  fr: { offline: 'YouTube hors ligne n\'est pas autorisé pendant {name}.\nLe navigateur se fermera dans {seconds} s.',
+        routine: 'routine {name} (appareil bloqué)',
         hours: 'en dehors des heures autorisées', quota: 'limite quotidienne atteinte ({used} sur {quota} min)',
         text: 'Le temps est écoulé : {why}.\nEnregistre ton travail — déconnexion dans {seconds} s.' },
 };
@@ -156,6 +171,7 @@ function refresh(dir, cfg, st, kid, u, today) {
     kid.routines = (curl(dir, base + '?include_disabled=1', { bearer }).items_list || []).map(r => ({
       uid: r.uid, name: r.name, on: r.enabled && !r.paused,
       counts: !!(r.policy || {}).counts_towards_daily_time_quota, block: (r.policy || {}).block_type || 0,
+      noVideo: entertainmentBlocked((r.policy || {}).web_rules),
       schedules: r.enabled && !r.paused ? (curl(dir, base + '/' + r.uid + '/schedules', { bearer }).items_list || []) : [],
     }));
     kid.routines_at = Date.now();
@@ -174,6 +190,14 @@ function refresh(dir, cfg, st, kid, u, today) {
   kid.used_date = today;
   kid.local_ms = 0; // the cloud figure now covers everything up to here
   kid.local_date = today;
+}
+
+// Does a routine's web policy block Entertainment? An allow-list (default 1) that does not list
+// it, or a block-list (default 0) that does. action: 0 = allow, 1 = block.
+function entertainmentBlocked(web) {
+  if (!web) return false;
+  const rule = (web.web_rules_list || []).find(w => w.category === ENTERTAINMENT);
+  return web.default_action === 1 ? !(rule && rule.action === 0) : !!(rule && rule.action === 1);
 }
 
 function ymd(d) {
@@ -244,6 +268,47 @@ function verdict(kid, now, today) {
 }
 function why(v, lang) { return v && fill((TEXTS[lang] || TEXTS.en)[v.code], v); }
 
+function dialog(u, text, seconds) {
+  sh('/bin/launchctl asuser ' + u.uid + ' /usr/bin/sudo -u ' + q(u.name) + ' /usr/bin/osascript -e ' +
+     q('display dialog "' + text.replace(/["\\]/g, '\\$&') + '" buttons {"OK"} with icon caution giving up after ' +
+       Math.max(5, seconds - 5)) + ' >/dev/null 2>&1 &');
+}
+
+// YouTube Premium lets a browser download videos into the site's own storage and play them with no
+// network request, so Qustodio's web filter never sees them. While a routine that blocks
+// Entertainment runs (Homework…), a browser reading those files means a video is playing:
+// warn, then close the browser. The files' access time is the signal (APFS updates it on read;
+// looking with stat/find does not).
+function offlineYouTube(cfg, kid, u, now) {
+  const mode = cfg.offline_youtube || 'block';
+  const routine = mode !== 'off' && activeRoutines(kid, now).find(r => r.noVideo && r.block !== BLOCK_DEVICE);
+  if (!routine) { kid.yt_warned_at = null; return; }
+  if (kid.yt_checked_at && now - kid.yt_checked_at < YT_CHECK_MS) return;
+  kid.yt_checked_at = now.getTime();
+  if (!kid.yt_dirs || kid.yt_dirs_on !== ymd(now)) {
+    const support = '/Users/' + u.name + '/Library/Application Support/';
+    kid.yt_dirs = BROWSERS.map(([d]) => support + d).filter(d => $.NSFileManager.defaultManager.fileExistsAtPath(d))
+      .flatMap(d => sh('/usr/bin/find ' + q(d) + ' -maxdepth 4 -type d -name "https_www.youtube.com_*.indexeddb.blob" 2>/dev/null || true')
+      .split('\n').filter(Boolean));
+    kid.yt_dirs_on = ymd(now);
+  }
+  if (!kid.yt_dirs.length) return;
+  const chunks = Number(sh('/usr/bin/find ' + kid.yt_dirs.map(q).join(' ') +
+    ' -type f -amin -1 2>/dev/null | /usr/bin/head -50 | /usr/bin/wc -l').trim()) || 0;
+  if (chunks < YT_MIN_CHUNKS) return;
+  log('offline YouTube during ' + routine.name + ': ' + chunks + ' chunks read in the last minute' +
+      (mode === 'log' ? ' (log only)' : ''));
+  if (mode === 'log') return;
+  const lang = TEXTS[cfg.lang] ? cfg.lang : TEXTS[kid.lang] ? kid.lang : 'en';
+  if (!kid.yt_warned_at || now - kid.yt_warned_at > 30 * 60e3) {
+    kid.yt_warned_at = now.getTime();
+    dialog(u, fill(TEXTS[lang].offline, { name: routine.name, seconds: YT_GRACE_MS / 1000 }), YT_GRACE_MS / 1000);
+  } else if (now - kid.yt_warned_at >= YT_GRACE_MS) {
+    log('closing browsers of ' + u.name + ' (offline YouTube during ' + routine.name + ')');
+    for (const [, proc] of BROWSERS) sh('/usr/bin/pkill -TERM -u ' + u.uid + ' -x ' + q(proc) + ' || true');
+  }
+}
+
 function warning(cfg, kid, v, grace) {
   const lang = TEXTS[cfg.lang] ? cfg.lang : TEXTS[kid.lang] ? kid.lang : 'en';
   return fill(cfg.message || TEXTS[lang].text, { why: why(v, lang), seconds: grace / 1000 });
@@ -258,10 +323,7 @@ function enforce(cfg, kid, u, v, now) {
     // poll logs out straight away, so logging back in buys nothing.
     kid.warned_at = now.getTime();
     log('warning ' + u.name + ': ' + reason);
-    const text = warning(cfg, kid, v, grace).replace(/["\\]/g, '\\$&');
-    sh('/bin/launchctl asuser ' + u.uid + ' /usr/bin/sudo -u ' + q(u.name) + ' /usr/bin/osascript -e ' +
-       q('display dialog "' + text + '" buttons {"OK"} with icon caution giving up after ' + (grace / 1000 - 5)) +
-       ' >/dev/null 2>&1 &');
+    dialog(u, warning(cfg, kid, v, grace), grace / 1000);
   } else if (now - kid.warned_at >= grace) {
     log('logging out ' + u.name + ': ' + reason);
     try { sh('/bin/launchctl bootout gui/' + u.uid); }
@@ -305,6 +367,9 @@ function run(argv) {
                ', lang ' + kid.lang + ', routines now: ' + JSON.stringify(activeRoutines(kid, now).map(r => r.name)) +
                ', verdict: ' + (why(v, 'en') || 'allowed') +
                (v ? '\n  dialog: ' + warning(cfg, kid, v, (cfg.grace_seconds || 60) * 1000) : ''));
-  else enforce(cfg, kid, u, v, now);
+  else {
+    enforce(cfg, kid, u, v, now);
+    if (!v) offlineYouTube(cfg, kid, u, now);
+  }
   save();
 }

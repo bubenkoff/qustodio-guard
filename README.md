@@ -54,6 +54,15 @@ On each run it:
 
 It polls rather than reacting to an unlock event, so there is no event to race.
 
+**Offline YouTube.** YouTube Premium can download videos into the browser's own storage and play
+them with no network request, so Qustodio's web filter never sees them. A child can download in
+free time and watch during a routine that blocks Entertainment (e.g. Homework). While such a
+routine runs, the guard checks every 30 s whether Chrome, Brave, Edge or Opera has read three
+or more chunks of offline YouTube in the last minute. If so, it shows a warning, and 15 s later
+closes the browser. It reads the files' access times (APFS updates them on read) and does not
+delete anything. Set `"offline_youtube": "log"` in `config.json` to only log, or `"off"` to
+disable it.
+
 **Offline.** The rules, today's usage and any running grant are cached. While the API cannot
 be reached, the guard adds the screen time it counts on the Mac itself to the last figure it
 got from the cloud. Sleep and more than 2 minutes without keyboard or mouse input do not count.
@@ -102,7 +111,7 @@ as root on the child's Mac. Fork it if you want to own that.
 Optional `/var/root/qustodio-guard/config.json`:
 
 ```json
-{ "profile": "Alex", "user": "alex", "grace_seconds": 60, "lang": "uk",
+{ "profile": "Alex", "user": "alex", "grace_seconds": 60, "lang": "uk", "offline_youtube": "block",
   "message": "Time's up: {why}.\nSave your work — you will be logged out in {seconds} s." }
 ```
 
