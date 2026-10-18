@@ -57,38 +57,38 @@ const BROWSERS = [
 // The warning dialog, in the kid's macOS language. config.json "lang" or "message" overrides.
 const TEXTS = {
   en: { app: '{app} isn\'t allowed during {name}.\nIt will close in {seconds} s.',
-        video: 'Watching downloaded videos isn\'t allowed during {name}.\n{app} will close in {seconds} s.',
-        offline: 'Offline YouTube isn\'t allowed during {name}.\nThe browser will close in {seconds} s.',
+        video: 'Watching downloaded videos isn\'t allowed during {name}.\nThe video will be closed in {seconds} s.',
+        offline: 'Offline YouTube isn\'t allowed during {name}.\nYouTube will be closed in {seconds} s.',
         routine: 'routine: {name} (device blocked)',
         hours: 'outside allowed hours', quota: 'daily limit used ({used} of {quota} min)',
         text: "Time's up: {why}.\nSave your work — you will be logged out in {seconds} s." },
   uk: { app: '{app} під час «{name}» не можна.\nЗастосунок закриється через {seconds} с.',
-        video: 'Дивитися завантажені відео під час «{name}» не можна.\n{app} закриється через {seconds} с.',
-        offline: 'Офлайн-YouTube під час «{name}» не можна.\nБраузер закриється через {seconds} с.',
+        video: 'Дивитися завантажені відео під час «{name}» не можна.\nВідео закриється через {seconds} с.',
+        offline: 'Офлайн-YouTube під час «{name}» не можна.\nYouTube закриється через {seconds} с.',
         routine: 'розпорядок «{name}» (пристрій заблоковано)',
         hours: 'поза дозволеними годинами', quota: 'денний ліміт вичерпано ({used} з {quota} хв)',
         text: 'Час вийшов: {why}.\nЗбережи роботу — через {seconds} с буде вихід із системи.' },
   nl: { app: '{app} is niet toegestaan tijdens {name}.\nDe app sluit over {seconds} s.',
-        video: 'Gedownloade video\'s kijken is niet toegestaan tijdens {name}.\n{app} sluit over {seconds} s.',
-        offline: 'Offline YouTube is niet toegestaan tijdens {name}.\nDe browser sluit over {seconds} s.',
+        video: 'Gedownloade video\'s kijken is niet toegestaan tijdens {name}.\nDe video wordt over {seconds} s gesloten.',
+        offline: 'Offline YouTube is niet toegestaan tijdens {name}.\nYouTube wordt over {seconds} s gesloten.',
         routine: 'routine {name} (apparaat geblokkeerd)',
         hours: 'buiten de toegestane uren', quota: 'daglimiet bereikt ({used} van {quota} min)',
         text: 'De tijd is om: {why}.\nSla je werk op — over {seconds} s word je uitgelogd.' },
   de: { app: '{app} ist während {name} nicht erlaubt.\nDie App wird in {seconds} s geschlossen.',
-        video: 'Heruntergeladene Videos sind während {name} nicht erlaubt.\n{app} wird in {seconds} s geschlossen.',
-        offline: 'Offline-YouTube ist während {name} nicht erlaubt.\nDer Browser wird in {seconds} s geschlossen.',
+        video: 'Heruntergeladene Videos sind während {name} nicht erlaubt.\nDas Video wird in {seconds} s geschlossen.',
+        offline: 'Offline-YouTube ist während {name} nicht erlaubt.\nYouTube wird in {seconds} s geschlossen.',
         routine: 'Routine {name} (Gerät gesperrt)',
         hours: 'außerhalb der erlaubten Zeiten', quota: 'Tageslimit erreicht ({used} von {quota} Min.)',
         text: 'Die Zeit ist um: {why}.\nSpeichere deine Arbeit — in {seconds} s wirst du abgemeldet.' },
   es: { app: '{app} no está permitido durante {name}.\nSe cerrará en {seconds} s.',
-        video: 'Ver vídeos descargados no está permitido durante {name}.\n{app} se cerrará en {seconds} s.',
-        offline: 'YouTube sin conexión no está permitido durante {name}.\nEl navegador se cerrará en {seconds} s.',
+        video: 'Ver vídeos descargados no está permitido durante {name}.\nEl vídeo se cerrará en {seconds} s.',
+        offline: 'YouTube sin conexión no está permitido durante {name}.\nYouTube se cerrará en {seconds} s.',
         routine: 'rutina {name} (dispositivo bloqueado)',
         hours: 'fuera del horario permitido', quota: 'límite diario agotado ({used} de {quota} min)',
         text: 'Se acabó el tiempo: {why}.\nGuarda tu trabajo: la sesión se cerrará en {seconds} s.' },
   fr: { app: '{app} n\'est pas autorisé pendant {name}.\nL\'app se fermera dans {seconds} s.',
-        video: 'Regarder des vidéos téléchargées n\'est pas autorisé pendant {name}.\n{app} se fermera dans {seconds} s.',
-        offline: 'YouTube hors ligne n\'est pas autorisé pendant {name}.\nLe navigateur se fermera dans {seconds} s.',
+        video: 'Regarder des vidéos téléchargées n\'est pas autorisé pendant {name}.\nLa vidéo sera fermée dans {seconds} s.',
+        offline: 'YouTube hors ligne n\'est pas autorisé pendant {name}.\nYouTube sera fermé dans {seconds} s.',
         routine: 'routine {name} (appareil bloqué)',
         hours: 'en dehors des heures autorisées', quota: 'limite quotidienne atteinte ({used} sur {quota} min)',
         text: 'Le temps est écoulé : {why}.\nEnregistre ton travail — déconnexion dans {seconds} s.' },
@@ -407,10 +407,49 @@ function localVideo(cfg, kid, u, now, routine) {
     log('local video during ' + routine.name + ' in ' + app + ': ' + file.split('/').pop() + (mode === 'log' ? ' (log only)' : ''));
     if (mode === 'log') continue;
     strike(kid, 'video:' + app, now, YT_GRACE_MS,
-      () => { action(kid, 'Downloaded video in ' + app + ' during ' + routine.name + ' (' + file.split('/').pop() + '): warned, closing it.');
+      () => { action(kid, 'Downloaded video in ' + app + ' during ' + routine.name + ' (' + file.split('/').pop() + '): warned, closing the video.');
               dialog(u, fill(TEXTS[lang].video, { app, name: routine.name, seconds: YT_GRACE_MS / 1000 }), YT_GRACE_MS / 1000); },
-      () => { log('closing ' + app + ' (local video during ' + routine.name + ')'); quit(u, app); });
+      () => {
+        if (TAB_BROWSERS.includes(app)) {
+          const n = closeTabs(u, 'u starts with "file://"');
+          if (n > 0) { log('closed ' + n + ' local-video tab(s) in ' + app + ' (' + routine.name + ')'); return; }
+        }
+        log('closing ' + app + ' (local video during ' + routine.name + ')'); quit(u, app);
+      });
   }
+}
+
+// Close only the offending tabs, through the browsers' AppleScript. That needs the macOS
+// Automation permission ("osascript wants to control Google Chrome"), granted once in the
+// child's session; the child can revoke it. Returns the number of tabs closed, or -1 when it could
+// not ask (no permission, no answer within 10 s); callers then close the whole browser instead.
+const TAB_BROWSERS = ['Google Chrome', 'Brave Browser', 'Microsoft Edge', 'Safari'];
+function closeTabs(u, condition) {
+  let closed = 0, failed = false;
+  for (const app of TAB_BROWSERS) {
+    if (!sh('/usr/bin/pgrep -u ' + u.uid + ' -x ' + q(app) + ' >/dev/null && echo up || true').trim()) continue;
+    const script = 'tell application "' + app + '"\n set n to 0\n repeat with w in windows\n' +
+      '  repeat with i from (count of tabs of w) to 1 by -1\n   set u to URL of tab i of w\n' +
+      '   if ' + condition + ' then\n    close tab i of w\n    set n to n + 1\n   end if\n  end repeat\n' +
+      ' end repeat\n return n\nend tell';
+    const out = sh('/bin/launchctl asuser ' + u.uid + ' /usr/bin/sudo -u ' + q(u.name) +
+                   ' /usr/bin/perl -e ' + q('alarm 10; exec @ARGV') + ' /usr/bin/osascript -e ' + q(script) + ' 2>&1 || true').trim();
+    if (/^\d+$/.test(out)) closed += Number(out);
+    else { failed = true; log('cannot close tabs in ' + app + ': ' + (out || 'no answer').slice(0, 160)); }
+  }
+  return closed || (failed ? -1 : 0);
+}
+
+// Ask for the Automation permission while someone can answer, not in the middle of Homework:
+// whenever Chrome is open and the permission is not known to work, once an hour, a harmless
+// AppleScript call that closes nothing. macOS shows its prompt the first time.
+function tabControlProbe(kid, u, now) {
+  if (kid.tab_control === 'ok' || (kid.tab_probe_at && now - kid.tab_probe_at < 3600e3)) return;
+  if (!sh('/usr/bin/pgrep -u ' + u.uid + ' -x "Google Chrome" >/dev/null && echo up || true').trim()) return;
+  kid.tab_probe_at = now.getTime();
+  const state = closeTabs(u, 'u is "qustodio-guard-probe"') < 0 ? 'denied' : 'ok';
+  if (state !== kid.tab_control) log('tab control in the browsers: ' + state);
+  kid.tab_control = state;
 }
 
 // YouTube Premium lets a browser download videos into the site's own storage and play them with no
@@ -450,10 +489,14 @@ function offlineYouTube(cfg, kid, u, now) {
   if (mode === 'log') return;
   const lang = langOf(cfg, kid);
   strike(kid, 'offline-youtube', now, YT_GRACE_MS,
-    () => { action(kid, 'Offline YouTube during ' + routine.name + ' (' + chunks + ' chunks a minute): warned, closing the browser.');
+    () => { action(kid, 'Offline YouTube during ' + routine.name + ' (' + chunks + ' chunks a minute): warned, closing YouTube.');
             dialog(u, fill(TEXTS[lang].offline, { name: routine.name, seconds: YT_GRACE_MS / 1000 }), YT_GRACE_MS / 1000); },
-    () => { log('closing browsers of ' + u.name + ' (offline YouTube during ' + routine.name + ')');
-            for (const [, proc] of BROWSERS) quit(u, proc); });
+    () => {
+      const n = closeTabs(u, 'u contains "youtube.com"');
+      if (n > 0) { log('closed ' + n + ' YouTube tab(s) of ' + u.name + ' (offline YouTube during ' + routine.name + ')'); return; }
+      log('closing browsers of ' + u.name + ' (offline YouTube during ' + routine.name + (n < 0 ? '; tabs could not be closed)' : ')'));
+      for (const [, proc] of BROWSERS) quit(u, proc);
+    });
 }
 
 function warning(cfg, kid, v, grace) {
@@ -546,7 +589,8 @@ function heartbeat(u, now, today) {
       version: st.version, console: u.name, routine: activeRoutines(k, now).map(r => r.name).join(', ') || null,
       used_min: k.used_date === today ? k.used_min : 0, quota_min: ((k.rules || {}).quotas || {})[day],
       bonus: bonusRunning(k, now, today), api_fail: k.api_fail || 0,
-      offline_youtube_stores: (k.yt_dirs || []).length, queued: (st.outbox || []).length } });
+      offline_youtube_stores: (k.yt_dirs || []).length, tab_control: k.tab_control || null,
+      queued: (st.outbox || []).length } });
   }
   while ((st.outbox || []).length && post(st.outbox[0])) st.outbox.shift(); // retry queued reports
 }
@@ -605,6 +649,7 @@ function run(argv) {
                (v ? '\n  dialog: ' + warning(cfg, kid, v, (cfg.grace_seconds || 60) * 1000) : ''));
   else {
     enforce(cfg, kid, u, v, now);
+    tabControlProbe(kid, u, now);
     // Extra time from the parent app runs under the free rules — Qustodio books it to the "Free"
     // routine — so a bonus in the middle of Homework lifts Homework's app and video rules too.
     if (!v && !bonusRunning(kid, now, today)) {
