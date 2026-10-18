@@ -57,6 +57,8 @@ if [[ ! -s $STATE/token ]]; then
 fi
 
 # daemon <label> <interval-seconds> <program> [args...] — (re)loads only if the plist changed.
+# AbandonProcessGroup: launchd otherwise kills every process a run started when the run ends —
+# which took the guard's warning dialogs down within a second, so none was ever seen.
 daemon() {
   local label=$1 interval=$2; shift 2
   local plist=/Library/LaunchDaemons/$label.plist args= new throttle=
@@ -74,6 +76,7 @@ daemon() {
   <key>ProgramArguments</key><array>$args</array>
   <key>StartInterval</key><integer>$interval</integer>$throttle
   <key>RunAtLoad</key><true/>
+  <key>AbandonProcessGroup</key><true/>
   <key>StandardOutPath</key><string>$LOG</string>
   <key>StandardErrorPath</key><string>$LOG</string>
 </dict>

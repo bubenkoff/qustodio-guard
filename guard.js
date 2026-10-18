@@ -410,8 +410,12 @@ function localVideo(cfg, kid, u, now, routine) {
   if (mode === 'off' || !routine.noVideo) return;
   if (kid.video_checked_at && now - kid.video_checked_at < VIDEO_CHECK_MS) return;
   kid.video_checked_at = now.getTime();
-  const out = sh('/usr/sbin/lsof -nP +c 0 -u ' + u.uid + ' -Fcan 2>/dev/null || true');
   const hits = {};
+  // Tabs first, when they can be read: catches even a short clip that the browser has already
+  // finished reading from disk, which lsof would miss.
+  for (const t of (kid.tab_control === 'ok' ? listTabs(u) || [] : []))
+    if (VIDEO_URL.test(t.url)) hits[t.app] = decodeURIComponent(t.url.replace(/^file:\/\//, ''));
+  const out = sh('/usr/sbin/lsof -nP +c 0 -u ' + u.uid + ' -Fcan 2>/dev/null || true');
   let cmd = '', mode_ = '';
   for (const line of out.split('\n')) {
     const t = line[0], v = line.slice(1);
@@ -429,7 +433,7 @@ function localVideo(cfg, kid, u, now, routine) {
               dialog(u, fill(TEXTS[lang].video, { app, name: routine.name, seconds: YT_GRACE_MS / 1000 }), YT_GRACE_MS / 1000); },
       () => {
         if (TAB_BROWSERS.includes(app)) {
-          const n = closeTabs(u, 'u starts with "file://"');
+          const n = closeTabs(u, VIDEO_TAB_CONDITION);
           if (n > 0) { log('closed ' + n + ' local-video tab(s) in ' + app + ' (' + routine.name + ')'); return; }
           if (n === 0) { log('local video in ' + app + ' but no file:// tab is open; browser left alone'); return; }
         }
@@ -459,6 +463,31 @@ function closeTabs(u, condition) {
   return closed || (failed ? -1 : 0);
 }
 
+// Every tab's URL in the running browsers, as [{app, url}], or null when any browser cannot be
+// asked (no Automation permission, no answer within 10 s).
+function listTabs(u) {
+  const tabs = [];
+  for (const app of TAB_BROWSERS) {
+    if (!sh('/usr/bin/pgrep -u ' + u.uid + ' -x ' + q(app) + ' >/dev/null && echo up || true').trim()) continue;
+    const script = 'tell application "' + app + '"\n set out to ""\n repeat with w in windows\n' +
+      '  repeat with t in tabs of w\n   set out to out & (URL of t) & linefeed\n  end repeat\n end repeat\n' +
+      ' return "OK" & linefeed & out\nend tell';
+    const r = sh('/bin/launchctl asuser ' + u.uid + ' /usr/bin/sudo -u ' + q(u.name) +
+                 ' /usr/bin/perl -e ' + q('alarm 10; exec @ARGV') + ' /usr/bin/osascript -e ' + q(script) + ' 2>&1 || true');
+    const lines = r.split(/\r?\n/);
+    if (lines[0].trim() !== 'OK') { log('cannot list tabs in ' + app + ': ' + (r.trim() || 'no answer').slice(0, 160)); return null; }
+    for (const url of lines.slice(1).filter(Boolean)) tabs.push({ app, url: url.trim() });
+  }
+  return tabs;
+}
+const YOUTUBE_URL = /^https?:\/\/([a-z0-9-]+\.)*youtube\.com(\/|$)/i;
+const YOUTUBE_TAB_CONDITION = ['youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com']
+  .flatMap(h => ['u starts with "https://' + h + '/"', 'u starts with "http://' + h + '/"', 'u is "https://' + h + '"']).join(' or ');
+const VIDEO_URL = /^file:\/\/.*\.(mp4|m4v|mov|mkv|webm|avi|wmv|flv|mpe?g|ts|m2ts|3gp)$/i;
+const VIDEO_TAB_CONDITION = '(u starts with "file://") and (' +
+  ['mp4', 'm4v', 'mov', 'mkv', 'webm', 'avi', 'wmv', 'flv', 'mpg', 'mpeg', 'ts', 'm2ts', '3gp']
+    .map(e => 'u ends with ".' + e + '"').join(' or ') + ')';
+
 // Ask for the Automation permission while someone can answer, not in the middle of Homework:
 // whenever Chrome is open and the permission is not known to work, once an hour, a harmless
 // AppleScript call that closes nothing. macOS shows its prompt the first time.
@@ -482,6 +511,24 @@ function offlineYouTube(cfg, kid, u, now) {
   if (!routine) return;
   if (kid.yt_checked_at && now - kid.yt_checked_at < YT_CHECK_MS) return;
   kid.yt_checked_at = now.getTime();
+  const lang = langOf(cfg, kid);
+  // With tab control, look at the tabs themselves. While the routine blocks Entertainment,
+  // Qustodio blocks YouTube online, so an open YouTube tab is offline YouTube or a block page —
+  // either way it should not be there. This is the reliable signal: the file access times below
+  // are updated by macOS only on the first read after a write, or once a day.
+  const tabs = kid.tab_control === 'ok' ? listTabs(u) : null;
+  if (tabs) {
+    const yt = tabs.filter(t => YOUTUBE_URL.test(t.url));
+    if (!yt.length) return;
+    log('YouTube open during ' + routine.name + ': ' + yt.length + ' tab(s)' + (mode === 'log' ? ' (log only)' : ''));
+    if (mode === 'log') return;
+    strike(kid, 'offline-youtube', now, YT_GRACE_MS,
+      () => { action(kid, 'YouTube open during ' + routine.name + ' (' + yt.length + ' tab(s)): warned, closing it.');
+              dialog(u, fill(TEXTS[lang].offline, { name: routine.name, seconds: YT_GRACE_MS / 1000 }), YT_GRACE_MS / 1000); },
+      () => { const n = closeTabs(u, YOUTUBE_TAB_CONDITION);
+              log('closed ' + n + ' YouTube tab(s) of ' + u.name + ' (' + routine.name + ')'); });
+    return;
+  }
   // Re-discovered hourly, and on every check while nothing is found: a profile gets its first
   // download at some point, and an empty answer must not stick for the day.
   if (!kid.yt_dirs || !kid.yt_dirs.length || now - (kid.yt_dirs_at || 0) > 3600e3) {
@@ -506,12 +553,11 @@ function offlineYouTube(cfg, kid, u, now) {
   log('offline YouTube during ' + routine.name + ': ' + chunks + ' chunks read in the last minute' +
       (mode === 'log' ? ' (log only)' : ''));
   if (mode === 'log') return;
-  const lang = langOf(cfg, kid);
   strike(kid, 'offline-youtube', now, YT_GRACE_MS,
     () => { action(kid, 'Offline YouTube during ' + routine.name + ' (' + chunks + ' chunks a minute): warned, closing YouTube.');
             dialog(u, fill(TEXTS[lang].offline, { name: routine.name, seconds: YT_GRACE_MS / 1000 }), YT_GRACE_MS / 1000); },
     () => {
-      const n = closeTabs(u, 'u contains "youtube.com"');
+      const n = closeTabs(u, YOUTUBE_TAB_CONDITION);
       if (n > 0) { log('closed ' + n + ' YouTube tab(s) of ' + u.name + ' (offline YouTube during ' + routine.name + ')'); return; }
       // With tab control working but no YouTube tab open, closing the whole browser would only
       // punish the child for whatever else is open: log it and leave the browser alone.
