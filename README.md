@@ -166,6 +166,13 @@ What this uses, and what else the unofficial API can do (including changing rout
 
 ## Requirements and caveats
 
+- **macOS permissions** (System Settings → Privacy & Security):
+  - **Full Disk Access for `/usr/bin/osascript`**. On macOS 27 the daemon otherwise cannot look into the
+    browsers' data, and offline YouTube goes unseen. The guard alerts when this happens.
+  - **Automation → Google Chrome (and Safari…)** in the child's session, so only the offending tab is
+    closed. The guard raises the prompt itself while Chrome is open, so be at the Mac to approve it.
+    Without it, the whole browser is closed instead.
+
 - A routine's own app and website rules (e.g. "only these apps during Homework") are
   Qustodio's to enforce. The guard only decides whether the session may continue at all.
 - **It always logs out**, which is Qustodio's *Lock device* on a Mac. With *Lock navigation*
