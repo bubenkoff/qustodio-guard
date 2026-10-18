@@ -344,7 +344,11 @@ function dialog(u, text, seconds) {
     log('warning not shown, one is already on screen: ' + text.split('\n')[0]);
     return;
   }
-  sh('/bin/launchctl asuser ' + u.uid + ' /usr/bin/sudo -u ' + q(u.name) + ' /usr/bin/osascript' +
+  // setsid first: the whole chain gets its own session and process group, so neither launchd's
+  // clean-up at the end of this run nor a signal forwarded by sudo can take the dialog down (with
+  // only AbandonProcessGroup it still vanished within a minute on 2026-10-18).
+  sh('/usr/bin/perl -MPOSIX -e ' + q('POSIX::setsid(); exec @ARGV') +
+     ' /bin/launchctl asuser ' + u.uid + ' /usr/bin/sudo -u ' + q(u.name) + ' /usr/bin/osascript' +
      ' -e ' + q('-- ' + DIALOG_MARK) +
      ' -e ' + q('display dialog "' + text.replace(/["\\]/g, '\\$&') + '" buttons {"OK"} default button "OK" with icon caution') +
      ' >/dev/null 2>&1 &');
