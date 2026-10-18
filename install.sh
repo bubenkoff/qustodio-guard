@@ -57,11 +57,14 @@ if [[ ! -s $STATE/token ]]; then
 fi
 
 # daemon <label> <interval-seconds> <program> [args...] — (re)loads only if the plist changed.
-# ThrottleInterval = interval: launchd's default of 10 s would otherwise cap the 5 s guard.
 daemon() {
   local label=$1 interval=$2; shift 2
-  local plist=/Library/LaunchDaemons/$label.plist args= new
+  local plist=/Library/LaunchDaemons/$label.plist args= new throttle=
   for a in "$@"; do args+="<string>$a</string>"; done
+  # Only to go *below* launchd's default of 10 s. On a long interval it would also forbid
+  # kickstarting the job by hand until that much time has passed (it did, for the updater: 6 h).
+  (( interval < 10 )) && throttle="
+  <key>ThrottleInterval</key><integer>$interval</integer>"
   new=$(cat <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -69,8 +72,7 @@ daemon() {
 <dict>
   <key>Label</key><string>$label</string>
   <key>ProgramArguments</key><array>$args</array>
-  <key>StartInterval</key><integer>$interval</integer>
-  <key>ThrottleInterval</key><integer>$interval</integer>
+  <key>StartInterval</key><integer>$interval</integer>$throttle
   <key>RunAtLoad</key><true/>
   <key>StandardOutPath</key><string>$LOG</string>
   <key>StandardErrorPath</key><string>$LOG</string>
