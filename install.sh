@@ -1,7 +1,7 @@
 #!/bin/zsh
 # Install qustodio-guard on a kid's Mac. Run from a parent (admin) account:
 #
-#   sudo ./install.sh [--profile <Qustodio profile name>]
+#   sudo ./install.sh [--profile <Qustodio profile name>] [--ha-webhook <Home Assistant webhook URL>]
 #
 # Without --profile, the guard works out which Qustodio profile watches whoever is at the
 # screen from Qustodio's own device list, and leaves admin accounts alone. Re-running is safe:
@@ -11,11 +11,12 @@ set -eu
 [[ $EUID -eq 0 ]] || { echo "run with sudo" >&2; exit 1; }
 here=${0:A:h}
 
-profile=
+profile= webhook=
 while (( $# )); do
   case $1 in
     --profile) profile=${2:?}; shift 2 ;;
-    *) echo "usage: sudo $0 [--profile <name>]" >&2; exit 1 ;;
+    --ha-webhook) webhook=${2:?}; shift 2 ;;
+    *) echo "usage: sudo $0 [--profile <name>] [--ha-webhook <url>]" >&2; exit 1 ;;
   esac
 done
 
@@ -25,16 +26,28 @@ STATE=/var/root/qustodio-guard
 LOG=/var/log/qustodio-guard.log
 
 install -d -o root -g wheel -m 755 "$LIB"
-install -o root -g wheel -m 644 "$here/guard.js" "$LIB/guard.js"
-for f in qustodio-token.sh update.sh install.sh uninstall.sh; do
-  install -o root -g wheel -m 755 "$here/$f" "$LIB/$f"
-done
+if [[ $here != "$LIB" ]]; then   # re-running the installed copy (e.g. to add --ha-webhook): nothing to copy
+  install -o root -g wheel -m 644 "$here/guard.js" "$LIB/guard.js"
+  for f in qustodio-token.sh update.sh install.sh uninstall.sh; do
+    install -o root -g wheel -m 755 "$here/$f" "$LIB/$f"
+  done
+fi
 install -d -o root -g wheel -m 700 $STATE
 
-if [[ -n $profile ]]; then
-  /usr/bin/osascript -l JavaScript -e 'function run(a){return JSON.stringify({profile:a[0]})}' "$profile" > $STATE/config.json
-  chmod 600 $STATE/config.json
-fi
+# config.json is merged, never replaced: other keys (lang, routine_apps…) survive a re-install.
+setcfg() {
+  local f=$STATE/config.json
+  /usr/bin/osascript -l JavaScript -e '
+    ObjC.import("Foundation");
+    function run(a) {
+      const s = $.NSString.stringWithContentsOfFileEncodingError(a[0], 4, null);
+      const c = s.isNil() ? {} : JSON.parse(s.js || "{}");
+      c[a[1]] = a[2];
+      return JSON.stringify(c, null, 1);
+    }' "$f" "$1" "$2" > $f.new && mv $f.new $f && chmod 600 $f
+}
+[[ -z $profile ]] || setcfg profile "$profile"
+[[ -z $webhook ]] || setcfg ha_webhook "$webhook"
 if [[ ! -s $STATE/token ]]; then
   [[ -z ${QG_FROM_UPDATE:-} ]] || { echo "no Qustodio token; run install.sh by hand" >&2; exit 1; }
   "$LIB/qustodio-token.sh" $STATE/token

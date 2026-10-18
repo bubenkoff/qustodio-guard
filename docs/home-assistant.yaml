@@ -1,0 +1,112 @@
+# qustodio-guard on the children's Macs reports here. Example package: put it in
+# /config/packages/, add qustodio_guard_webhook: <random id> to secrets.yaml, restart HA,
+# and one sensor block per child (kid = the Qustodio profile name).
+#
+# The guard (https://github.com/bubenkoff/qustodio-guard) logs a child out when Qustodio says their time is up, enforces routines' app
+# rules, and stops offline/downloaded video during routines that block Entertainment. It POSTs
+# JSON to a local-only webhook:
+#   {host, kid, event: heartbeat|alert|resolved|action, key, message, status: {...}}
+# - heartbeat: every 15 min while the Mac is awake -> sensor.qustodio_guard_<kid>
+# - alert / resolved: it cannot do its job (API down for hours, login rejected, no access to
+#   the browsers' storage...) -> Telegram, repeated every 12 h while it lasts
+# - action: it warned the child and is logging out / closing an app -> Telegram
+# The webhook id is a secret on both sides: secrets.yaml here, and the root-only
+# /var/root/qustodio-guard/config.json ("ha_webhook") on each Mac.
+
+automation:
+  - id: qustodio_guard_report
+    alias: Qustodio guard report
+    description: Receives qustodio-guard reports from the kids' Macs. Re-fires them as the
+      qustodio_guard_report event, which the per-child sensors listen to, and sends alerts and
+      enforcement notices to Telegram.
+    mode: queued
+    max: 30
+    triggers:
+      - trigger: webhook
+        webhook_id: !secret qustodio_guard_webhook
+        allowed_methods: [POST]
+        local_only: true
+    actions:
+      - event: qustodio_guard_report
+        event_data:
+          host: "{{ trigger.json.host | default('?') }}"
+          kid: "{{ trigger.json.kid | default('?') }}"
+          kind: "{{ trigger.json.event | default('heartbeat') }}"
+          status: "{{ trigger.json.status | default({}) }}"
+      - if:
+          - condition: template
+            value_template: "{{ trigger.json.event | default('') in ['alert', 'resolved', 'action'] }}"
+        then:
+          - action: telegram_bot.send_message
+            data:
+              parse_mode: html
+              message: >-
+                {{ {'alert': '🛡️⚠️', 'resolved': '🛡️✅', 'action': '🛡️'}[trigger.json.event] }}
+                <b>Qustodio guard</b> · {{ trigger.json.kid | e }} on {{ trigger.json.host | e }}{{ '\n' }}{{ trigger.json.message | e }}
+
+  - id: qustodio_guard_silent
+    alias: Qustodio guard silent
+    description: A guard that has not reported for 26 h. The Mac may simply be off or away from
+      home, but a guard that broke or was removed looks exactly the same. 26 h rather than 1 h
+      because a MacBook with its lid closed sleeps and sends nothing all night. At most daily.
+    triggers:
+      - trigger: time_pattern
+        minutes: 7
+    variables:
+      silent: >-
+        {% set ns = namespace(out=[]) %}
+        {% for s in states.sensor if s.entity_id.startswith('sensor.qustodio_guard_')
+             and s.state not in ['unknown', 'unavailable'] %}
+          {% set t = s.state | as_datetime(none) %}
+          {% if t and (now() - t).total_seconds() > 26 * 3600 %}
+            {% set ns.out = ns.out + [s.name ~ ' (last report ' ~ relative_time(t) ~ ' ago)'] %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.out }}
+    conditions:
+      - condition: template
+        value_template: "{{ silent | count > 0 }}"
+      - condition: template
+        value_template: >-
+          {% set lt = state_attr('automation.qustodio_guard_silent', 'last_triggered') %}
+          {{ lt is none or (now() - lt).total_seconds() > 23 * 3600 }}
+    actions:
+      - action: telegram_bot.send_message
+        data:
+          parse_mode: html
+          message: >-
+            🛡️⏱ <b>Qustodio guard silent</b>{{ '\n' }}{{ silent | join('\n') | e }}{{ '\n\n' }}The Mac
+            is off or away from home, or the guard there broke or was removed. Check with
+            <code>tail /var/log/qustodio-guard.log</code> on that Mac.
+
+template:
+  - triggers:
+      - trigger: event
+        event_type: qustodio_guard_report
+        event_data:
+          kid: Alex  # the Qustodio profile name
+    sensor:
+      - name: Qustodio guard Alex
+        unique_id: qustodio_guard_alex
+        device_class: timestamp
+        icon: mdi:shield-account
+        state: "{{ now().isoformat() }}"
+        attributes:
+          host: "{{ trigger.event.data.host }}"
+          last_report: "{{ trigger.event.data.kind }}"
+          status: "{{ trigger.event.data.status }}"
+  - triggers:
+      - trigger: event
+        event_type: qustodio_guard_report
+        event_data:
+          kid: Sam
+    sensor:
+      - name: Qustodio guard Sam
+        unique_id: qustodio_guard_sam
+        device_class: timestamp
+        icon: mdi:shield-account
+        state: "{{ now().isoformat() }}"
+        attributes:
+          host: "{{ trigger.event.data.host }}"
+          last_report: "{{ trigger.event.data.kind }}"
+          status: "{{ trigger.event.data.status }}"

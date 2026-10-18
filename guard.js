@@ -366,6 +366,7 @@ function routineApps(cfg, kid, u, now, routine) {
     if (mode === 'log') { log('not allowed during ' + routine.name + ': ' + a.name + ' (' + a.bundle + '), log only'); continue; }
     strike(kid, 'app:' + a.bundle, now, YT_GRACE_MS,
       () => { log('not allowed during ' + routine.name + ': ' + a.name + ' (' + a.bundle + ')');
+              action(kid, a.name + ' is not allowed during ' + routine.name + ': warned, closing it.');
               dialog(u, fill(TEXTS[lang].app, { app: a.name, name: routine.name, seconds: YT_GRACE_MS / 1000 }), YT_GRACE_MS / 1000); },
       () => { log('closing ' + a.name + ' (' + a.bundle + '): not allowed during ' + routine.name);
               sh('/bin/kill -TERM ' + a.pid + ' 2>/dev/null || true'); });
@@ -402,7 +403,8 @@ function localVideo(cfg, kid, u, now, routine) {
     log('local video during ' + routine.name + ' in ' + app + ': ' + file.split('/').pop() + (mode === 'log' ? ' (log only)' : ''));
     if (mode === 'log') continue;
     strike(kid, 'video:' + app, now, YT_GRACE_MS,
-      () => dialog(u, fill(TEXTS[lang].video, { app, name: routine.name, seconds: YT_GRACE_MS / 1000 }), YT_GRACE_MS / 1000),
+      () => { action(kid, 'Downloaded video in ' + app + ' during ' + routine.name + ' (' + file.split('/').pop() + '): warned, closing it.');
+              dialog(u, fill(TEXTS[lang].video, { app, name: routine.name, seconds: YT_GRACE_MS / 1000 }), YT_GRACE_MS / 1000); },
       () => { log('closing ' + app + ' (local video during ' + routine.name + ')'); quit(u, app); });
   }
 }
@@ -444,7 +446,8 @@ function offlineYouTube(cfg, kid, u, now) {
   if (mode === 'log') return;
   const lang = langOf(cfg, kid);
   strike(kid, 'offline-youtube', now, YT_GRACE_MS,
-    () => dialog(u, fill(TEXTS[lang].offline, { name: routine.name, seconds: YT_GRACE_MS / 1000 }), YT_GRACE_MS / 1000),
+    () => { action(kid, 'Offline YouTube during ' + routine.name + ' (' + chunks + ' chunks a minute): warned, closing the browser.');
+            dialog(u, fill(TEXTS[lang].offline, { name: routine.name, seconds: YT_GRACE_MS / 1000 }), YT_GRACE_MS / 1000); },
     () => { log('closing browsers of ' + u.name + ' (offline YouTube during ' + routine.name + ')');
             for (const [, proc] of BROWSERS) quit(u, proc); });
 }
@@ -463,12 +466,81 @@ function enforce(cfg, kid, u, v, now) {
     // poll logs out straight away, so logging back in buys nothing.
     kid.warned_at = now.getTime();
     log('warning ' + u.name + ': ' + reason);
+    action(kid, 'Warned, logging out in ' + grace / 1000 + ' s: ' + reason + '.');
     dialog(u, warning(cfg, kid, v, grace), grace / 1000);
   } else if (now - kid.warned_at >= grace) {
     log('logging out ' + u.name + ': ' + reason);
     try { sh('/bin/launchctl bootout gui/' + u.uid); }
     catch (e) { log('bootout failed (' + e.message + '), killing processes'); sh('/usr/bin/pkill -KILL -u ' + u.uid + ' || true'); }
   }
+}
+
+// ---- Reporting to Home Assistant (optional: config.json "ha_webhook") ----------------------
+// Heartbeats show the guard is alive; alerts say it cannot do its job; actions say what it did.
+// Payload: {host, kid, event: heartbeat|alert|resolved|action, key, message, status}.
+const HEARTBEAT_MS = 15 * 60e3;
+const ALERT_REPEAT_MS = 12 * 3600e3;
+const API_ALERT_FAILS = 180; // ~3 h of failed polls (one a minute)
+const CTX = {};              // dir, cfg, st, host — set by run()
+function setContext(o) { Object.assign(CTX, o); }
+function reporting() { return !!(CTX.cfg && CTX.cfg.ha_webhook && CTX.st && CTX.dir); }
+
+function post(payload) {
+  if (!reporting()) return true;
+  const body = CTX.dir + '/report.json', cfgf = CTX.dir + '/report.cfg';
+  writeFile(body, JSON.stringify(Object.assign({ host: CTX.host }, payload)));
+  writeFile(cfgf, ['url = "' + CTX.cfg.ha_webhook + '"', 'silent', 'fail', 'max-time = 8',
+                   'header = "Content-Type: application/json"', 'data-binary = "@' + body + '"'].join('\n') + '\n');
+  try { sh('/usr/bin/curl -K ' + q(cfgf) + ' -o /dev/null'); return true; }
+  catch (e) { return false; }
+}
+
+// Alerts and actions are queued while HA is unreachable (the Mac at school), heartbeats are not.
+function tell(payload) {
+  if (!reporting()) return; // reporting is optional; never let it break enforcement
+  const st = CTX.st;
+  st.outbox = (st.outbox || []).concat([Object.assign({ at: new Date().toISOString() }, payload)]).slice(-30);
+  while (st.outbox.length && post(st.outbox[0])) st.outbox.shift();
+}
+
+function action(kid, message) { tell({ kid: kid.profile_name || '?', event: 'action', message }); }
+
+// Raise an alert when `on`, repeat it every ALERT_REPEAT_MS while it lasts, resolve it when it ends.
+function alarm(kid, key, on, message) {
+  if (!reporting()) return;
+  const st = CTX.st; st.alerts = st.alerts || {};
+  const a = st.alerts[key], t = Date.now(), who = kid.profile_name || '?';
+  if (on && (!a || t - a.sent >= ALERT_REPEAT_MS)) {
+    log('alert ' + key + ': ' + message);
+    st.alerts[key] = { since: a ? a.since : t, sent: t };
+    tell({ kid: who, event: 'alert', key, message });
+  } else if (!on && a) {
+    delete st.alerts[key];
+    const fixed = { api: 'The Qustodio API answers again.', token: 'The Qustodio login works again.',
+                    profile: 'The child\'s Qustodio profile is found again.', stores: 'The browsers\' storage can be read again.' };
+    tell({ kid: who, event: 'resolved', key, message: fixed[key.split(':')[0]] || 'Resolved: ' + key });
+  }
+}
+
+function heartbeat(u, now, today) {
+  if (!reporting()) return;
+  const st = CTX.st;
+  if (st.hb_at && now - st.hb_at < HEARTBEAT_MS) return;
+  st.hb_at = now.getTime();
+  if (!st.version_on || st.version_on !== today) {
+    st.version = sh('/usr/bin/shasum ' + q('/Library/Application Support/qustodio-guard/guard.js') + ' 2>/dev/null || true').slice(0, 12) || '?';
+    st.version_on = today;
+  }
+  const kids = Object.values(st.kids).filter(k => k.profile_name);
+  for (const k of kids.length ? kids : [{}]) {
+    const day = DAYS[now.getDay()];
+    post({ kid: k.profile_name || '?', event: 'heartbeat', status: {
+      version: st.version, console: u.name, routine: activeRoutines(k, now).map(r => r.name).join(', ') || null,
+      used_min: k.used_date === today ? k.used_min : 0, quota_min: ((k.rules || {}).quotas || {})[day],
+      bonus: bonusRunning(k, now, today), api_fail: k.api_fail || 0,
+      offline_youtube_stores: (k.yt_dirs || []).length, queued: (st.outbox || []).length } });
+  }
+  while ((st.outbox || []).length && post(st.outbox[0])) st.outbox.shift(); // retry queued reports
 }
 
 function run(argv) {
@@ -480,8 +552,11 @@ function run(argv) {
   const now = new Date();
   const today = sh('/bin/date +%F').trim();
   const save = () => writeFile(dir + '/state.json', JSON.stringify(st));
+  if (!st.host) st.host = sh('/usr/sbin/scutil --get ComputerName 2>/dev/null || /bin/hostname').trim();
+  setContext({ dir, cfg, st, host: st.host });
 
   const u = localUser();
+  if (!dry) heartbeat(u, now, today);
   if (Number(u.uid) < 501) return save();                     // login window, setup, system users
   if (cfg.user ? u.name !== cfg.user : u.admin && !dry) return save();   // parents are not guarded
 
@@ -495,10 +570,23 @@ function run(argv) {
       kid.api_fail = 0;
     } catch (e) {
       kid.api_fail = (kid.api_fail || 0) + 1;
+      kid.api_error = e.message;
       st.access_token = null; // a revoked token would otherwise be reused until it expires
       if (kid.api_fail === 1 || kid.api_fail % 60 === 0)
         log('API failed (' + kid.api_fail + ' in a row), using cache: ' + e.message);
     }
+  }
+
+  if (!dry) {
+    const err = kid.api_error || '';
+    alarm(kid, 'api:' + kid.profile_name, kid.api_fail >= API_ALERT_FAILS,
+          'Qustodio API failing for ' + kid.api_fail + ' polls (~' + Math.round(kid.api_fail / 60) + ' h); running on cached rules. Last error: ' + err);
+    alarm(kid, 'token:' + kid.profile_name, kid.api_fail > 0 && /no refresh token|error: 40[01]/.test(err),
+          'Qustodio login rejected — re-run qustodio-token.sh on this Mac (was the parent password changed?). ' + err);
+    alarm(kid, 'profile:' + u.name, kid.api_fail > 0 && /Qustodio profile/.test(err), err);
+    alarm(kid, 'stores:' + kid.profile_name, /errors:/.test(kid.yt_dirs_log || ''),
+          'Cannot look into the browsers\' offline YouTube storage: ' + (kid.yt_dirs_log || ''));
+    if (!kid.api_fail) kid.api_error = null;
   }
 
   const v = verdict(kid, now, today);

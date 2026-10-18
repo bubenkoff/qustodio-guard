@@ -136,6 +136,26 @@ Optional `/var/root/qustodio-guard/config.json`:
   "message": "Time's up: {why}.\nSave your work — you will be logged out in {seconds} s." }
 ```
 
+## Home Assistant reports (optional)
+
+Install with `--ha-webhook <url>` (stored in the root-only `config.json`), and the guard reports
+to a Home Assistant webhook:
+- a **heartbeat** every 15 min while the Mac is awake: version, who is at the screen, routine,
+  quota time, API state, offline stores found;
+- **alerts** when it cannot do its job: the API has been failing for ~3 h, the Qustodio login
+  is rejected, the profile is not found, or the browsers' storage cannot be read. Each alert
+  repeats every 12 h while it lasts, and a resolved message follows when it ends;
+- **actions** at the first warning: logging out, closing an app, stopping offline or local video.
+
+Alerts and actions are queued while HA is unreachable, for example at school. Payload:
+`{host, kid, event: heartbeat|alert|resolved|action, key, message, status}`. A Home Assistant
+package that turns these into per-child sensors and Telegram messages, plus a 26-hour silence
+watchdog, is in [docs/home-assistant.yaml](docs/home-assistant.yaml).
+
+```bash
+sudo "/Library/Application Support/qustodio-guard/install.sh" --ha-webhook "http://<ha>:8123/api/webhook/<id>"
+```
+
 ## The API
 
 What this uses, and what else the unofficial API can do (including changing routines), is in
