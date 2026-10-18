@@ -60,7 +60,7 @@ It polls rather than reacting to an unlock event, so there is no event to race.
 while a routine runs, the guard compares the child's foreground apps (`lsappinfo`) with the
 routine's Mac app rules: apps allowed by name or by category (Qustodio's catalogue gives each
 app's bundle id and category), and the routine's default. Anything not allowed gets a warning
-and is closed a minute later. The Finder and the rest of the desktop, Qustodio itself, TeamViewer,
+and is closed 15 seconds later. The Finder and the rest of the desktop, Qustodio itself, TeamViewer,
 apps Qustodio marks unblockable, and **browsers** are never touched. Browsers are exempt because
 the web rules decide what they may open, and a routine that forgot to allow one would otherwise
 take school away with it. Apps Qustodio has never seen fall to the
@@ -70,7 +70,7 @@ allow-list. `"routine_apps": "log"` or `"off"` in `config.json`.
 **Local video.** Films and clips played from disk (a browser via `file://`, QuickTime, VLC,
 IINA…) are invisible to Qustodio as well. During a routine that blocks Entertainment, the guard
 checks every 30 s with `lsof` for a video file open *for reading* by a player. If it finds one,
-it warns and, a minute later, closes that tab or player. iMovie is deliberately not a player: making a video for
+it warns and, 15 seconds later, closes that tab or player. iMovie is deliberately not a player: making a video for
 school is not watching one. Recording, which writes, does not count, and neither do videos
 inside app bundles. `"local_video": "log"` or `"off"`.
 
@@ -78,7 +78,7 @@ inside app bundles. `"local_video": "log"` or `"off"`.
 them with no network request, so Qustodio's web filter never sees them. A child can download in
 free time and watch during a routine that blocks Entertainment (e.g. Homework). While such a
 routine runs, the guard checks every 30 s whether Chrome, Brave, Edge or Opera has read three
-or more chunks of offline YouTube in the last minute. If so, it shows a warning and, a minute
+or more chunks of offline YouTube in the last minute. If so, it shows a warning and, 15 seconds
 later, closes the YouTube tabs; the whole browser is closed only if it cannot close tabs. It reads the files' access times (APFS updates them on read) and does not
 delete anything. Set `"offline_youtube": "log"` in `config.json` to only log, or `"off"` to
 disable it.

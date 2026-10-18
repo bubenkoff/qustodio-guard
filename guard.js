@@ -32,7 +32,7 @@ const IDLE_MS = 120e3;    // no keyboard/mouse for this long: away, not screen t
 const ENTERTAINMENT = 6;  // Qustodio web category: YouTube and other video sites
 const YT_CHECK_MS = 30e3; // how often to look for offline YouTube playback
 const YT_MIN_CHUNKS = 3;  // offline chunks read in the last minute that mean "a video is playing"
-const YT_GRACE_MS = 60e3; // from the warning to closing an app, a tab or a video: time to wrap up
+const YT_GRACE_MS = 15e3; // from the warning to closing an app, a tab or a video: enough to pause, not to watch
 const APPS_CHECK_MS = 10e3;  // how often to compare running apps with the routine's allow-list
 const VIDEO_CHECK_MS = 30e3; // how often to look for local video files open in players
 const VIDEO_FILE = /\.(mp4|m4v|mov|mkv|webm|avi|wmv|flv|mpe?g|ts|m2ts|3gp)$/i;
@@ -364,6 +364,17 @@ function strike(kid, key, now, graceMs, warn, close) {
   else if (t - at >= graceMs) close();
 }
 
+// Whether a periodic check should run now: its interval has passed, or a warning it gave has just
+// run out of grace — so the close comes 15 s after the warning, not at the next 30 s check.
+function due(kid, field, intervalMs, prefix, now) {
+  const last = kid[field] || 0, t = now.getTime();
+  const graceUp = Object.entries(kid.strikes || {})
+    .some(([k, at]) => k.startsWith(prefix) && at + YT_GRACE_MS > last && t >= at + YT_GRACE_MS);
+  if (t - last < intervalMs && !graceUp) return false;
+  kid[field] = t;
+  return true;
+}
+
 function langOf(cfg, kid) { return TEXTS[cfg.lang] ? cfg.lang : TEXTS[kid.lang] ? kid.lang : 'en'; }
 
 function quit(u, proc) { sh('/usr/bin/pkill -TERM -u ' + u.uid + ' -x ' + q(proc) + ' || true'); }
@@ -384,8 +395,7 @@ function runningApps(u) {
 function routineApps(cfg, kid, u, now, routine) {
   const mode = cfg.routine_apps || 'block';
   if (mode === 'off' || !routine.apps) return;
-  if (kid.apps_checked_at && now - kid.apps_checked_at < APPS_CHECK_MS) return;
-  kid.apps_checked_at = now.getTime();
+  if (!due(kid, 'apps_checked_at', APPS_CHECK_MS, 'app:', now)) return;
   const lang = langOf(cfg, kid);
   for (const a of runningApps(u)) {
     if (!enforceable(a) || appAllowed(routine, kid, a.bundle)) continue;
@@ -412,8 +422,7 @@ function playerApp(cmd) {
 function localVideo(cfg, kid, u, now, routine) {
   const mode = cfg.local_video || 'block';
   if (mode === 'off' || !routine.noVideo) return;
-  if (kid.video_checked_at && now - kid.video_checked_at < VIDEO_CHECK_MS) return;
-  kid.video_checked_at = now.getTime();
+  if (!due(kid, 'video_checked_at', VIDEO_CHECK_MS, 'video:', now)) return;
   const hits = {};
   // Tabs first, when they can be read: catches even a short clip that the browser has already
   // finished reading from disk, which lsof would miss.
@@ -513,8 +522,7 @@ function offlineYouTube(cfg, kid, u, now) {
   const mode = cfg.offline_youtube || 'block';
   const routine = mode !== 'off' && activeRoutines(kid, now).find(r => r.noVideo && r.block !== BLOCK_DEVICE);
   if (!routine) return;
-  if (kid.yt_checked_at && now - kid.yt_checked_at < YT_CHECK_MS) return;
-  kid.yt_checked_at = now.getTime();
+  if (!due(kid, 'yt_checked_at', YT_CHECK_MS, 'offline-youtube', now)) return;
   const lang = langOf(cfg, kid);
   // With tab control, look at the tabs themselves. While the routine blocks Entertainment,
   // Qustodio blocks YouTube online, so an open YouTube tab is offline YouTube or a block page —
