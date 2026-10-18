@@ -45,6 +45,10 @@ const ALWAYS_OK = /^(com\.apple\.(finder|dock|loginwindow|systemuiserver|control
 // rules' business, and offline YouTube and local video are caught separately. A routine that
 // forgot to allow a browser would otherwise take school away with it.
 const BROWSER_APPS = /^(com\.google\.chrome(\.beta|\.canary)?|com\.apple\.safari|com\.operasoftware\.opera.*|com\.brave\.browser.*|com\.microsoft\.edgemac.*|org\.mozilla\.firefox.*|org\.chromium\.chromium)$/;
+// Installed web apps (PWAs, e.g. YouTube Music) are a site in a browser window. The web rules
+// already decide whether the site loads, and their process is the browser's, so "closing" one
+// closed all of Chrome. Seen live 2026-10-18.
+const WEB_APPS = /^(com\.google\.chrome|com\.brave\.browser|com\.microsoft\.edgemac|org\.chromium\.chromium)\.app\./;
 // Browsers whose YouTube Premium offline downloads live in <profile>/IndexedDB, and their processes.
 const BROWSERS = [
   ['Google/Chrome', 'Google Chrome'], ['BraveSoftware/Brave-Browser', 'Brave Browser'],
@@ -242,7 +246,7 @@ function appRules(ar) {
 // Would Qustodio let this app run during the routine? action: 0 = allow, 1 = block.
 function appAllowed(routine, kid, bundle) {
   const r = routine.apps;
-  if (!r || ALWAYS_OK.test(bundle) || BROWSER_APPS.test(bundle)) return true;
+  if (!r || ALWAYS_OK.test(bundle) || BROWSER_APPS.test(bundle) || WEB_APPS.test(bundle)) return true;
   const known = (kid.catalog || {})[bundle];
   if (known && !known.blockable) return true;
   if (bundle in r.apps) return r.apps[bundle] === 0;
@@ -426,7 +430,7 @@ function offlineYouTube(cfg, kid, u, now) {
     const support = '/Users/' + u.name + '/Library/Application Support/';
     const found = [], errors = [];
     for (const [d] of BROWSERS) {
-      const r = sh('/usr/bin/find ' + q(support + d) + ' -maxdepth 4 -type d -name "https_www.youtube.com_*.indexeddb.blob" 2>&1 || true');
+      const r = sh('/usr/bin/find ' + q(support + d) + ' -maxdepth 4 -type d -name "https_*youtube.com_*.indexeddb.blob" 2>&1 || true');
       for (const line of r.split('\n').filter(Boolean))
         (line.startsWith('/') && !/: (Operation not permitted|Permission denied|No such file)/.test(line) ? found : errors).push(line);
     }
