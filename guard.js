@@ -334,8 +334,8 @@ function dialog(u, text, seconds) {
 // the grace the child actually sees.
 function strike(kid, key, now, graceMs, warn, close) {
   kid.strikes = kid.strikes || {};
-  const at = kid.strikes[key], t = Date.now();
-  if (!at || t - at > 30 * 60e3) { warn(); kid.strikes[key] = Date.now(); }
+  const at = kid.strikes[key], t = Math.max(Date.now(), now.getTime());
+  if (!at || t - at > 30 * 60e3) { warn(); kid.strikes[key] = Math.max(Date.now(), now.getTime()); }
   else if (t - at >= graceMs) close();
 }
 
@@ -418,12 +418,22 @@ function offlineYouTube(cfg, kid, u, now) {
   if (!routine) return;
   if (kid.yt_checked_at && now - kid.yt_checked_at < YT_CHECK_MS) return;
   kid.yt_checked_at = now.getTime();
-  if (!kid.yt_dirs || kid.yt_dirs_on !== ymd(now)) {
+  // Re-discovered hourly, and on every check while nothing is found: a profile gets its first
+  // download at some point, and an empty answer must not stick for the day.
+  if (!kid.yt_dirs || !kid.yt_dirs.length || now - (kid.yt_dirs_at || 0) > 3600e3) {
     const support = '/Users/' + u.name + '/Library/Application Support/';
-    kid.yt_dirs = BROWSERS.map(([d]) => support + d).filter(d => $.NSFileManager.defaultManager.fileExistsAtPath(d))
-      .flatMap(d => sh('/usr/bin/find ' + q(d) + ' -maxdepth 4 -type d -name "https_www.youtube.com_*.indexeddb.blob" 2>/dev/null || true')
-      .split('\n').filter(Boolean));
-    kid.yt_dirs_on = ymd(now);
+    const found = [], errors = [];
+    for (const [d] of BROWSERS) {
+      const r = sh('/usr/bin/find ' + q(support + d) + ' -maxdepth 4 -type d -name "https_www.youtube.com_*.indexeddb.blob" 2>&1 || true');
+      for (const line of r.split('\n').filter(Boolean))
+        (line.startsWith('/') && !/: (Operation not permitted|Permission denied|No such file)/.test(line) ? found : errors).push(line);
+    }
+    const relevant = errors.filter(e => !/No such file/.test(e));
+    const summary = found.length + ' offline-YouTube store(s)' + (relevant.length ? '; errors: ' + relevant.slice(0, 3).join(' | ') : '');
+    if (summary !== kid.yt_dirs_log) log('offline YouTube watch: ' + summary); // log changes only
+    kid.yt_dirs_log = summary;
+    kid.yt_dirs = found;
+    kid.yt_dirs_at = now.getTime();
   }
   if (!kid.yt_dirs.length) return;
   const chunks = Number(sh('/usr/bin/find ' + kid.yt_dirs.map(q).join(' ') +
