@@ -431,6 +431,7 @@ function localVideo(cfg, kid, u, now, routine) {
         if (TAB_BROWSERS.includes(app)) {
           const n = closeTabs(u, 'u starts with "file://"');
           if (n > 0) { log('closed ' + n + ' local-video tab(s) in ' + app + ' (' + routine.name + ')'); return; }
+          if (n === 0) { log('local video in ' + app + ' but no file:// tab is open; browser left alone'); return; }
         }
         log('closing ' + app + ' (local video during ' + routine.name + ')'); quit(u, app);
       });
@@ -512,7 +513,10 @@ function offlineYouTube(cfg, kid, u, now) {
     () => {
       const n = closeTabs(u, 'u contains "youtube.com"');
       if (n > 0) { log('closed ' + n + ' YouTube tab(s) of ' + u.name + ' (offline YouTube during ' + routine.name + ')'); return; }
-      log('closing browsers of ' + u.name + ' (offline YouTube during ' + routine.name + (n < 0 ? '; tabs could not be closed)' : ')'));
+      // With tab control working but no YouTube tab open, closing the whole browser would only
+      // punish the child for whatever else is open: log it and leave the browser alone.
+      if (n === 0) { log('offline YouTube during ' + routine.name + ' but no YouTube tab is open; browser left alone'); return; }
+      log('closing browsers of ' + u.name + ' (offline YouTube during ' + routine.name + '; tabs could not be closed)');
       for (const [, proc] of BROWSERS) quit(u, proc);
     });
 }
