@@ -106,6 +106,11 @@ Optional `/var/root/qustodio-guard/config.json`:
   "message": "Time's up: {why}.\nSave your work — you will be logged out in {seconds} s." }
 ```
 
+## The API
+
+What this uses, and what else the unofficial API can do (including changing routines), is in
+[docs/API.md](docs/API.md), along with how to find the endpoints again when Qustodio changes them.
+
 ## Requirements and caveats
 
 - A routine's own app and website rules (e.g. "only these apps during Homework") are
