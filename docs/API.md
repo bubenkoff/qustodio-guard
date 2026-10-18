@@ -93,7 +93,9 @@ from_date, to_date, enabled, overrides}`. A schedule can run past midnight (Bedt
 
 `{restriction_type: 2, duration (s), rrule: "DTSTART:YYYYMMDDTHHMMSS\nFREQ=DAILY;COUNT=1",
 rrule_dtstart (local)}`. It is the newest of today's; a later grant replaces the earlier one,
-and `duration: 0` clears it.
+and `duration: 0` clears it. **While it runs, the child is under the free rules:**
+`summary_hourly` books that time to the profile's "Free" routine (seen 2026-10-18, a bonus in
+the middle of Homework), even while Free itself is paused.
 
 ## Write
 

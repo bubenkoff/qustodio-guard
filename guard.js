@@ -287,11 +287,16 @@ function tick(kid, now, today) {
 
 // Why the session must end, or null. Works from cached state when the API is unreachable,
 // so switching Wi-Fi off once the limit is hit changes nothing.
+function bonusRunning(kid, now, today) {
+  const x = kid.used_date === today ? kid.extra : null;
+  return !!(x && now >= x.start && now < x.start + x.seconds * 1000);
+}
+
 // Returns {code: 'routine'|'hours'|'quota', name, used, quota}.
 function verdict(kid, now, today) {
   if (!kid.rules) return null;
   const extra = kid.used_date === today ? kid.extra : null;
-  if (extra && now >= extra.start && now < extra.start + extra.seconds * 1000) return null; // granted time running
+  if (bonusRunning(kid, now, today)) return null; // granted time running
   const day = DAYS[now.getDay()];
   if (kid.routines && kid.routines.length) {
     // With routines, they are the schedule; the legacy restricted-times mask is not used.
@@ -494,7 +499,9 @@ function run(argv) {
                (v ? '\n  dialog: ' + warning(cfg, kid, v, (cfg.grace_seconds || 60) * 1000) : ''));
   else {
     enforce(cfg, kid, u, v, now);
-    if (!v) {
+    // Extra time from the parent app runs under the free rules — Qustodio books it to the "Free"
+    // routine — so a bonus in the middle of Homework lifts Homework's app and video rules too.
+    if (!v && !bonusRunning(kid, now, today)) {
       offlineYouTube(cfg, kid, u, now);
       const routine = activeRoutines(kid, now).find(r => r.block !== BLOCK_DEVICE && (r.apps || r.noVideo));
       if (routine) { routineApps(cfg, kid, u, now, routine); localVideo(cfg, kid, u, now, routine); }

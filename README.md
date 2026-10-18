@@ -42,7 +42,9 @@ On each run it:
      A quota of 0 is Qustodio's *Block* (the whole day), unless every day is 0, which means
      limits were never set. Screen time is the profile's total across its devices, which is
      how Qustodio describes it: "all devices under one child profile share the same time limits".
-   - Extra time is added to the day's quota, as Qustodio documents it. In addition, and this
+   - Extra time is added to the day's quota, as Qustodio documents it. While a grant runs,
+     Qustodio puts the child under the free rules (it books the time to the "Free" routine), so
+     the guard also suspends a running routine's app and video checks. In addition, and this
      is our own choice, nothing is enforced for `duration` seconds from the moment of the
      grant, even outside the allowed hours. Qustodio's docs do not say whether a grant beats
      restricted hours, and a parent who grants time at 22:02 means for it to be used.
