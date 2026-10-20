@@ -43,7 +43,7 @@ and devices have both as well. v1 paths take the numeric ids, v2 paths take the 
 | Rules (default) | `GET /v1/accounts/{id}/profiles/{pid}/rules?app_rules=1`, see below |
 | Screen time by hour | `GET /v2/accounts/{uid}/profiles/{puid}/summary_hourly?date=YYYY-MM-DD`, see below |
 | Apps and sites per day | `GET /v2/accounts/{uid}/profiles/{puid}/summary/domains-and-apps?min_date=…&max_date=…`. `type` 101 = site (with `categories`), 301 = app (with `platform`) |
-| Routines | `GET /v2/accounts/{uid}/profiles/{puid}/routines?include_disabled=1` |
+| Routines | `GET /v2/accounts/{uid}/profiles/{puid}/routines?include_disabled=1&filter_app_rules=false` |
 | Routine schedules | `GET /v2/accounts/{uid}/profiles/{puid}/routines/{ruid}/schedules` |
 | Extra time today | `GET /v2/accounts/{uid}/profiles/{puid}/rules/calendar_restrictions?custom_filter=newest_today_extra_time` |
 | Safe networks | `GET /v2/accounts/{uid}/profiles/{puid}/rules/safe-networks` |
@@ -82,6 +82,12 @@ does not count. A `device_uid` parameter is accepted but ignored: there is no pe
           web_rules: {default_action, web_rules_list[{category, action}]}}}
 ```
 
+**Always pass `filter_app_rules=false`**, on GET and on PATCH, as the web app does. Without it the server
+filters `app_rules`: a GET leaves out the allow entries, and a PATCH drops `app_category_rules_list` and
+the allow entries. Switching `default_action` without it also erases the category rules (seen 2026-10-20).
+`app_category_rules_list[{category_id, action}]` uses the app catalogue's categories: `social_media`,
+`gaming`, `entertainment`, `education`, `ai`, `other`. A named app entry overrides its category.
+
 `action` / `default_action`: **0 = allow, 1 = block**. So `default_action: 1` with a list of
 `action: 0` is an allow-list ("Only educational websites"). `default_action: 0` with
 `action: 1` entries is a block-list.
@@ -101,7 +107,7 @@ the middle of Homework), even while Free itself is paused.
 
 | What | Request | Tested |
 |---|---|---|
-| Change a routine | `PATCH /v2/accounts/{uid}/profiles/{puid}/routines/{ruid}` with `{"policy": {…}}`, the whole policy object as read, modified | **yes**, 2026-10-18: only the changed part moved |
+| Change a routine | `PATCH /v2/accounts/{uid}/profiles/{puid}/routines/{ruid}?filter_app_rules=false` with `{"policy": {…}}`, the whole policy object as read, modified | **yes**, 2026-10-18: only the changed part moved |
 | Create a routine | `POST …/routines` | no |
 | Delete a routine | `DELETE …/routines/{ruid}` | no |
 | Schedules | `POST …/routines/{ruid}/schedules`, `PATCH`/`DELETE …/schedules/{suid}` | no |

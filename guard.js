@@ -208,7 +208,9 @@ function refresh(dir, cfg, st, kid, u, today) {
   // swaps in its own rules, and its time counts towards the daily quota only if it says so.
   if (!kid.routines_at || Date.now() - kid.routines_at >= ROUTINES_MS || kid.routines_on !== today) {
     const base = API + '/v2/accounts/' + kid.account_uid + '/profiles/' + kid.profile_uid + '/routines';
-    kid.routines = (curl(dir, base + '?include_disabled=1', { bearer }).items_list || []).map(r => ({
+    // filter_app_rules=false, as the web app sends it: without it the server leaves out the app
+    // rules' allow entries, so an app allowed by name inside a blocked category looked blocked.
+    kid.routines = (curl(dir, base + '?include_disabled=1&filter_app_rules=false', { bearer }).items_list || []).map(r => ({
       uid: r.uid, name: r.name, on: r.enabled && !r.paused,
       counts: !!(r.policy || {}).counts_towards_daily_time_quota, block: (r.policy || {}).block_type || 0,
       noVideo: entertainmentBlocked((r.policy || {}).web_rules),
