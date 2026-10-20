@@ -608,6 +608,10 @@ function enforce(cfg, kid, u, v, now) {
 // Heartbeats show the guard is alive; alerts say it cannot do its job; actions say what it did.
 // Payload: {host, kid, event: heartbeat|alert|resolved|action, key, message, status}.
 const HEARTBEAT_MS = 15 * 60e3;
+// The updater's own launchd interval (6 h) changes only on a manual install.sh, so the guard starts
+// it this often instead. A change to this number reaches every Mac with the next update.
+const UPDATE_MS = 15 * 60e3;
+const UPDATER = 'system/io.github.bubenkoff.qustodio-guard.update';
 const ALERT_REPEAT_MS = 12 * 3600e3;
 const API_ALERT_FAILS = 180; // ~3 h of failed polls (one a minute)
 const CTX = {};              // dir, cfg, st, host — set by run()
@@ -677,6 +681,13 @@ function heartbeat(u, now, today) {
   while ((st.outbox || []).length && post(st.outbox[0])) st.outbox.shift(); // retry queued reports
 }
 
+function kickUpdater(now) {
+  const st = CTX.st;
+  if (st.update_at && now - st.update_at < UPDATE_MS) return;
+  st.update_at = now.getTime();
+  sh('/bin/launchctl kickstart ' + UPDATER + ' >/dev/null 2>&1 || true'); // starts it, does not wait
+}
+
 function run(argv) {
   const dir = argv[0];
   const dry = argv.includes('--dry-run');
@@ -691,6 +702,7 @@ function run(argv) {
 
   const u = localUser();
   if (!dry) heartbeat(u, now, today);
+  if (!dry) kickUpdater(now);
   if (Number(u.uid) < 501) return save();                     // login window, setup, system users
   if (cfg.user ? u.name !== cfg.user : u.admin && !dry) return save();   // parents are not guarded
 

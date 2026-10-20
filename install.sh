@@ -93,7 +93,8 @@ PLIST
   echo "loaded $label"
 }
 daemon $LABEL 5 /usr/bin/osascript -l JavaScript "$LIB/guard.js" $STATE
-# Self-update from GitHub main, every 6 h. Not touched when update.sh itself runs this script:
+# Self-update from GitHub main. guard.js starts it every 15 min; this 6 h interval is the fallback
+# for a guard that is not running. Not touched when update.sh itself runs this script:
 # reloading that job would kill the run doing the reloading.
 [[ -n ${QG_FROM_UPDATE:-} ]] || daemon $LABEL.update 21600 /bin/zsh "$LIB/update.sh"
 

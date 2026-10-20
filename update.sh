@@ -1,5 +1,6 @@
 #!/bin/zsh
-# Self-update from GitHub main. Run by launchd as root every 6 hours (installed by install.sh).
+# Self-update from GitHub main. Run as root by launchd: guard.js kickstarts the job every 15 min,
+# and its own interval of 6 hours (installed by install.sh) is the fallback.
 # Only files that changed are replaced, and only after guard.js compiles — a broken push must
 # not leave the kid unguarded. A changed install.sh is run too (plists); the updater's own plist
 # is the one thing that still needs a manual re-run.

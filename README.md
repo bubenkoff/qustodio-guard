@@ -121,7 +121,8 @@ sudo osascript -l JavaScript "/Library/Application Support/qustodio-guard/guard.
 The log is in `/var/log/qustodio-guard.log`. To remove everything, including the token:
 `sudo "/Library/Application Support/qustodio-guard/uninstall.sh"`.
 
-**Updates.** A second daemon pulls `main` from this repository every 6 hours and replaces the
+**Updates.** A second daemon pulls `main` from this repository every 15 minutes (the guard starts it;
+its own launchd interval, 6 hours, is the fallback if the guard is not running) and replaces the
 installed scripts that changed. It only does so if the new `guard.js` compiles, so a broken
 push leaves the old version running. If `install.sh` changed, the updater runs it, and it
 reloads only the launchd jobs whose plist changed. The one exception is the updater's own
