@@ -600,11 +600,9 @@ function enforce(cfg, kid, u, v, now) {
     dialog(u, warning(cfg, kid, v, grace), grace / 1000);
   } else if (now - kid.warned_at >= grace) {
     // A normal logout first, as from the Apple menu but with no confirmation: apps are asked to
-    // quit and save their state, and macOS notes the apps that were running to reopen them at the
-    // next login. launchctl bootout kills the session instead, and macOS then reopened every app
-    // on its running list, including apps killed earlier in the day rather than quit (reported
-    // 2026-10-22). Once per warning: a login ended within 30 min of one is forced straight away,
-    // while it is still reopening apps, so as not to save a half-reopened list.
+    // quit and can save their state, which launchctl bootout does not allow them. Once per
+    // warning: a login ended within 30 min of one is forced straight away, while it is still
+    // reopening apps, so as not to save a half-reopened list of apps to reopen.
     if (kid.logout_asked_for !== kid.warned_at) {
       kid.logout_asked_for = kid.warned_at;
       kid.logout_asked_at = now.getTime();
