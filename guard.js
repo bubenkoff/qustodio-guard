@@ -32,6 +32,7 @@ const IDLE_MS = 120e3;    // no keyboard/mouse for this long: away, not screen t
 const ENTERTAINMENT = 6;  // Qustodio web category: YouTube and other video sites
 const YT_CHECK_MS = 30e3; // how often to look for offline YouTube playback
 const YT_MIN_CHUNKS = 3;  // offline chunks read in the last minute that mean "a video is playing"
+const LOGOUT_WAIT_MS = 30e3; // a normal logout not done by then (an app asking to save…) is forced
 const YT_GRACE_MS = 15e3; // from the warning to closing an app, a tab or a video: enough to pause, not to watch
 const APPS_CHECK_MS = 10e3;  // how often to compare running apps with the routine's allow-list
 const VIDEO_CHECK_MS = 30e3; // how often to look for local video files open in players
@@ -598,7 +599,25 @@ function enforce(cfg, kid, u, v, now) {
     action(kid, 'Warned, logging out in ' + grace / 1000 + ' s: ' + reason + '.');
     dialog(u, warning(cfg, kid, v, grace), grace / 1000);
   } else if (now - kid.warned_at >= grace) {
-    log('logging out ' + u.name + ': ' + reason);
+    // A normal logout first, as from the Apple menu but with no confirmation: apps are asked to
+    // quit and save their state, and macOS notes the apps that were running to reopen them at the
+    // next login. launchctl bootout kills the session instead, and macOS then reopened every app
+    // on its running list, including apps killed earlier in the day rather than quit (reported
+    // 2026-10-22). Once per warning: a login ended within 30 min of one is forced straight away,
+    // while it is still reopening apps, so as not to save a half-reopened list.
+    if (kid.logout_asked_for !== kid.warned_at) {
+      kid.logout_asked_for = kid.warned_at;
+      kid.logout_asked_at = now.getTime();
+      log('logging out ' + u.name + ': ' + reason);
+      // kAEReallyLogOut, written with escapes: the chevrons are not ASCII.
+      const out = sh('/bin/launchctl asuser ' + u.uid + ' /usr/bin/sudo -u ' + q(u.name) + ' /usr/bin/perl -e ' +
+         q('alarm 10; exec @ARGV') + ' /usr/bin/osascript -e ' + q('tell application "loginwindow" to \u00abevent aevtrlgo\u00bb') +
+         ' 2>&1 || true').trim();
+      if (out) log('normal logout of ' + u.name + ' answered: ' + out.slice(0, 160));
+      return;
+    }
+    if (now - kid.logout_asked_at < LOGOUT_WAIT_MS) return;
+    log('logging out ' + u.name + ' by force: ' + reason);
     try { sh('/bin/launchctl bootout gui/' + u.uid); }
     catch (e) { log('bootout failed (' + e.message + '), killing processes'); sh('/usr/bin/pkill -KILL -u ' + u.uid + ' || true'); }
   }

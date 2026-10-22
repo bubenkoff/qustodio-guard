@@ -50,9 +50,12 @@ On each run it:
      restricted hours, and a parent who grants time at 22:02 means for it to be used.
 4. If the quota is used up, or the current hour is outside the allowed hours, it warns the child
    with a dialog in their macOS language (English, Ukrainian, Dutch, German, Spanish, French;
-   anything else falls back to English). After 60 seconds it ends that user's session, and only
-   that user's, with `launchctl bootout gui/<uid>`. For 30 minutes after a warning, every new
-   login is ended within about 5 seconds.
+   anything else falls back to English). After 60 seconds it logs that user out, and only that
+   user, as the Apple menu would but without asking, so apps save their state and macOS reopens
+   the ones that were running at the next login. If the session has not ended 30 seconds later
+   (an app waiting for its document to be saved, say), it is ended with
+   `launchctl bootout gui/<uid>`. For 30 minutes after a warning, every new login is ended within
+   about 5 seconds, by force.
 
 It polls rather than reacting to an unlock event, so there is no event to race.
 
