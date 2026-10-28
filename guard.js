@@ -269,20 +269,28 @@ function ymd(d) {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
-// Routines running now. A schedule that started yesterday may run past midnight (Bedtime).
+// Is this schedule running now? One that started yesterday may run past midnight (Bedtime).
+function scheduleRunning(s, now) {
+  if (s.enabled === false) return false;
+  for (const back of [0, 1]) {
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - back);
+    if (!(s.weekdays || []).includes(WEEKDAYS[d.getDay()])) continue;
+    if ((s.from_date && ymd(d) < s.from_date) || (s.to_date && ymd(d) > s.to_date)) continue;
+    const [h, m, sec] = String(s.start_time).split(':').map(Number);
+    const start = new Date(d.getFullYear(), d.getMonth(), d.getDate(), h, m, sec || 0);
+    if (now >= start && now - start < s.duration_minutes * 60e3) return true;
+  }
+  return false;
+}
+
+// Routines running now. Switching the routine in the parent app ("Switched routine") adds a
+// one-day schedule with overrides: true to the chosen routine; while it runs, only overriding
+// routines count, so Homework switched on at 20:05 replaces Bedtime instead of losing to it.
 function activeRoutines(kid, now) {
-  return (kid.routines || []).filter(r => r.on && r.schedules.some(s => {
-    if (s.enabled === false) return false;
-    for (const back of [0, 1]) {
-      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - back);
-      if (!(s.weekdays || []).includes(WEEKDAYS[d.getDay()])) continue;
-      if ((s.from_date && ymd(d) < s.from_date) || (s.to_date && ymd(d) > s.to_date)) continue;
-      const [h, m, sec] = String(s.start_time).split(':').map(Number);
-      const start = new Date(d.getFullYear(), d.getMonth(), d.getDate(), h, m, sec || 0);
-      if (now >= start && now - start < s.duration_minutes * 60e3) return true;
-    }
-    return false;
-  }));
+  const on = (kid.routines || []).filter(r => r.on);
+  const overriding = on.filter(r => r.schedules.some(s => s.overrides && scheduleRunning(s, now)));
+  if (overriding.length) return overriding;
+  return on.filter(r => r.schedules.some(s => scheduleRunning(s, now)));
 }
 
 function idleMs() {

@@ -94,6 +94,10 @@ the allow entries. Switching `default_action` without it also erases the categor
 
 Schedules: `{uid, weekdays: ["MO",…,"SU"], start_time: "HH:MM:SS" (local), duration_minutes,
 from_date, to_date, enabled, overrides}`. A schedule can run past midnight (Bedtime).
+**Switching the routine** in the parent app ("Switched routine" on the dashboard) adds a one-day
+schedule to the chosen routine: `from_date` = `to_date` = today, `start_time` the moment of the
+switch, `duration_minutes` as chosen, `overrides: true`. While it runs it replaces every other
+routine, Bedtime included (seen 2026-10-28: Homework at 20:05 for 30 min, over Bedtime from 20:00).
 
 ### Extra time (calendar restriction)
 
