@@ -116,7 +116,7 @@ the middle of Homework), even while Free itself is paused.
 | Delete a routine | `DELETE …/routines/{ruid}` | no |
 | Schedules | `POST …/routines/{ruid}/schedules`, `PATCH`/`DELETE …/schedules/{suid}` | no |
 | Extra time | `POST`/`PUT …/rules/calendar_restrictions` (per home-assistant-qustodio) | no |
-| Default rules | `PUT /v1/accounts/{id}/profiles/{pid}/rules` (per home-assistant-qustodio) | no |
+| Default rules | `PUT /v1/accounts/{id}/profiles/{pid}/rules` with the whole object as read by a GET without `app_rules=1`, modified | **yes**, 2026-10-28: two `web.domains` entries added, nothing else moved (diffed against `?app_rules=1`) |
 | Safe networks | `PATCH …/rules/safe-networks` | no |
 
 Read the object, change only what you mean to, write it back, then read it again and diff.
