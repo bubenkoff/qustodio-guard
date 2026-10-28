@@ -24,7 +24,7 @@ const CLIENT_SECRET = '3e8826cbed3b996f8b206c7d6a4b2321529bc6bd';
 const DAYS = ['sun', 'mon', 'tue', 'wed', 'thr', 'fri', 'sat']; // Qustodio spells Thursday "thr"
 const MACOS = 1; // device.platform
 const REFRESH_MS = 60e3;  // API at most this often; screen time there lags minutes anyway
-const ROUTINES_MS = 5 * 60e3; // routines and their schedules: 1 + N calls, and they rarely change
+const ROUTINES_MS = 5 * 60e3; // routines with their policies; their schedules are re-read every poll
 const WEEKDAYS = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA']; // routine schedules, by getDay()
 const BLOCK_DEVICE = 2;   // routine policy.block_type: 0 = rules only, 1 = no internet, 2 = device
 const TICK_GAP_MS = 30e3; // a longer gap between runs means the Mac slept: not screen time
@@ -220,6 +220,12 @@ function refresh(dir, cfg, st, kid, u, today) {
     }));
     kid.routines_at = Date.now();
     kid.routines_on = today;
+  } else {
+    // Between full reads, the schedules alone every poll: switching the routine in the parent
+    // app adds a schedule, and a 5-minute-old copy kept logging the child out after the switch.
+    const base = API + '/v2/accounts/' + kid.account_uid + '/profiles/' + kid.profile_uid + '/routines';
+    const fresh = kid.routines.map(r => r.on ? (curl(dir, base + '/' + r.uid + '/schedules', { bearer }).items_list || []) : []);
+    kid.routines.forEach((r, i) => { r.schedules = fresh[i]; });
   }
   // Quota time = time under the default rules + time in routines that count towards it.
   const counting = new Set(kid.routines.filter(r => r.counts).map(r => r.uid));
