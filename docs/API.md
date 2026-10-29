@@ -47,6 +47,8 @@ and devices have both as well. v1 paths take the numeric ids, v2 paths take the 
 | Routine schedules | `GET /v2/accounts/{uid}/profiles/{puid}/routines/{ruid}/schedules` |
 | Extra time today | `GET /v2/accounts/{uid}/profiles/{puid}/rules/calendar_restrictions?custom_filter=newest_today_extra_time` |
 | Safe networks | `GET /v2/accounts/{uid}/profiles/{puid}/rules/safe-networks` |
+| Places | `GET /v2/accounts/{uid}/places`: `[{uid, name, latitude, longitude, radius (m), address}]`. They belong to the account, not to a profile: arriving at and leaving any place is reported for every child |
+| Timeline | `GET /v2/accounts/{uid}/profiles/{puid}/events?min_date=…&max_date=…&limit=…` gives `{timeline: [...]}`, newest first. Locations are `type` 400 (401 at night) with `location_latitude`, `location_longitude`, `location_accuracy`, `dt` (UTC) and `place_name` when inside a place |
 
 ### `rules` (v1)
 
@@ -118,6 +120,7 @@ the middle of Homework), even while Free itself is paused.
 | Extra time | `POST`/`PUT …/rules/calendar_restrictions` (per home-assistant-qustodio) | no |
 | Default rules | `PUT /v1/accounts/{id}/profiles/{pid}/rules` with the whole object as read by a GET without `app_rules=1`, modified | **yes**, 2026-10-28: two `web.domains` entries added, nothing else moved (diffed against `?app_rules=1`) |
 | Safe networks | `PATCH …/rules/safe-networks` | no |
+| Places | `POST /v2/accounts/{uid}/places` with `{name, latitude, longitude, radius, address}`; `PUT`/`DELETE …/places/{placeUid}` | POST **yes**, 2026-10-29: returns the place with its `uid` |
 
 Read the object, change only what you mean to, write it back, then read it again and diff.
 
