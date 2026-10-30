@@ -212,11 +212,13 @@ function refresh(dir, cfg, st, kid, u, today) {
     // filter_app_rules=false, as the web app sends it: without it the server leaves out the app
     // rules' allow entries, so an app allowed by name inside a blocked category looked blocked.
     kid.routines = (curl(dir, base + '?include_disabled=1&filter_app_rules=false', { bearer }).items_list || []).map(r => ({
-      uid: r.uid, name: r.name, on: r.enabled && !r.paused,
+      uid: r.uid, name: r.name, enabled: !!r.enabled, on: r.enabled && !r.paused,
       counts: !!(r.policy || {}).counts_towards_daily_time_quota, block: (r.policy || {}).block_type || 0,
       noVideo: entertainmentBlocked((r.policy || {}).web_rules),
       apps: appRules((r.policy || {}).app_rules),
-      schedules: r.enabled && !r.paused ? (curl(dir, base + '/' + r.uid + '/schedules', { bearer }).items_list || []) : [],
+      // A paused routine's schedules too: the parent app can switch to a paused routine (Free is
+      // paused here), and that switch is an overriding schedule on it.
+      schedules: r.enabled ? (curl(dir, base + '/' + r.uid + '/schedules', { bearer }).items_list || []) : [],
     }));
     kid.routines_at = Date.now();
     kid.routines_on = today;
@@ -224,7 +226,7 @@ function refresh(dir, cfg, st, kid, u, today) {
     // Between full reads, the schedules alone every poll: switching the routine in the parent
     // app adds a schedule, and a 5-minute-old copy kept logging the child out after the switch.
     const base = API + '/v2/accounts/' + kid.account_uid + '/profiles/' + kid.profile_uid + '/routines';
-    const fresh = kid.routines.map(r => r.on ? (curl(dir, base + '/' + r.uid + '/schedules', { bearer }).items_list || []) : []);
+    const fresh = kid.routines.map(r => (r.enabled ?? r.on) ? (curl(dir, base + '/' + r.uid + '/schedules', { bearer }).items_list || []) : []);
     kid.routines.forEach((r, i) => { r.schedules = fresh[i]; });
   }
   // Quota time = time under the default rules + time in routines that count towards it.
@@ -292,11 +294,12 @@ function scheduleRunning(s, now) {
 // Routines running now. Switching the routine in the parent app ("Switched routine") adds a
 // one-day schedule with overrides: true to the chosen routine; while it runs, only overriding
 // routines count, so Homework switched on at 20:05 replaces Bedtime instead of losing to it.
+// A switch to a paused routine applies as well: pausing stops its regular schedules only.
 function activeRoutines(kid, now) {
-  const on = (kid.routines || []).filter(r => r.on);
-  const overriding = on.filter(r => r.schedules.some(s => s.overrides && scheduleRunning(s, now)));
+  const enabled = (kid.routines || []).filter(r => r.enabled ?? r.on);
+  const overriding = enabled.filter(r => r.schedules.some(s => s.overrides && scheduleRunning(s, now)));
   if (overriding.length) return overriding;
-  return on.filter(r => r.schedules.some(s => scheduleRunning(s, now)));
+  return enabled.filter(r => r.on).filter(r => r.schedules.some(s => !s.overrides && scheduleRunning(s, now)));
 }
 
 function idleMs() {
