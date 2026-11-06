@@ -201,6 +201,10 @@ function refresh(dir, cfg, st, kid, u, today) {
   kid.catalog = {};
   for (const a of (rules.app_rules || {}).application_list || [])
     if (a.platform === MACOS && a.exe) kid.catalog[a.exe.toLowerCase()] = { cat: a.category_id, blockable: a.blockable !== false, name: a.name };
+  // Sites the parent allowed by name in the default rules (web.domains, 0 = allow). Qustodio lets
+  // them through in routines too, so the guard must not close them as YouTube: music.youtube.com
+  // for YouTube Music in School was closed 10 s after opening, 2026-11-06.
+  kid.allowed_sites = Object.entries((rules.web || {}).domains || {}).filter(([, a]) => a === 0).map(([h]) => h.toLowerCase());
   kid.rules = { time_ranges: tr.time_ranges || {}, quotas: tr.quotas || {},
                 weekdays_quota: tr.is_weekdays_quota !== false, weekend_quota: tr.is_weekend_quota !== false };
   const hourly = curl(dir, API + '/v2/accounts/' + kid.account_uid + '/profiles/' + kid.profile_uid +
@@ -514,8 +518,13 @@ function listTabs(u) {
   return tabs;
 }
 const YOUTUBE_URL = /^https?:\/\/([a-z0-9-]+\.)*youtube\.com(\/|$)/i;
-const YOUTUBE_TAB_CONDITION = ['youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com']
-  .flatMap(h => ['u starts with "https://' + h + '/"', 'u starts with "http://' + h + '/"', 'u is "https://' + h + '"']).join(' or ');
+const YOUTUBE_HOSTS = ['youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com'];
+// A host on the parent's allowed list, or under one of its domains.
+const siteAllowed = (kid, host) => (kid.allowed_sites || []).some(d => host === d || host.endsWith('.' + d));
+const hostOf = url => ((/^[a-z]+:\/\/([^\/:?#]+)/i.exec(url) || [])[1] || '').toLowerCase();
+// The AppleScript condition for the YouTube tabs to close: allowed hosts are left open.
+const youtubeTabCondition = kid => YOUTUBE_HOSTS.filter(h => !siteAllowed(kid, h))
+  .flatMap(h => ['u starts with "https://' + h + '/"', 'u starts with "http://' + h + '/"', 'u is "https://' + h + '"']).join(' or ') || 'false';
 const VIDEO_URL = /^file:\/\/.*\.(mp4|m4v|mov|mkv|webm|avi|wmv|flv|mpe?g|ts|m2ts|3gp)$/i;
 const VIDEO_TAB_CONDITION = '(u starts with "file://") and (' +
   ['mp4', 'm4v', 'mov', 'mkv', 'webm', 'avi', 'wmv', 'flv', 'mpg', 'mpeg', 'ts', 'm2ts', '3gp']
@@ -550,14 +559,14 @@ function offlineYouTube(cfg, kid, u, now) {
   // are updated by macOS only on the first read after a write, or once a day.
   const tabs = kid.tab_control === 'ok' ? listTabs(u) : null;
   if (tabs) {
-    const yt = tabs.filter(t => YOUTUBE_URL.test(t.url));
+    const yt = tabs.filter(t => YOUTUBE_URL.test(t.url) && !siteAllowed(kid, hostOf(t.url)));
     if (!yt.length) return;
     log('YouTube open during ' + routine.name + ': ' + yt.length + ' tab(s)' + (mode === 'log' ? ' (log only)' : ''));
     if (mode === 'log') return;
     strike(kid, 'offline-youtube', now, YT_GRACE_MS,
       () => { action(kid, 'YouTube open during ' + routine.name + ' (' + yt.length + ' tab(s)): warned, closing it.');
               dialog(u, fill(TEXTS[lang].offline, { name: routine.name, seconds: YT_GRACE_MS / 1000 }), YT_GRACE_MS / 1000); },
-      () => { const n = closeTabs(u, YOUTUBE_TAB_CONDITION);
+      () => { const n = closeTabs(u, youtubeTabCondition(kid));
               log('closed ' + n + ' YouTube tab(s) of ' + u.name + ' (' + routine.name + ')'); });
     return;
   }
@@ -578,8 +587,10 @@ function offlineYouTube(cfg, kid, u, now) {
     kid.yt_dirs = found;
     kid.yt_dirs_at = now.getTime();
   }
-  if (!kid.yt_dirs.length) return;
-  const chunks = Number(sh('/usr/bin/find ' + kid.yt_dirs.map(q).join(' ') +
+  // Stores are named https_<host>_0.indexeddb.blob: an allowed site's own (YouTube Music) is not watched.
+  const dirs = kid.yt_dirs.filter(d => !siteAllowed(kid, ((/https_(.+?)_\d+\.indexeddb\.blob$/.exec(d) || [])[1] || '').toLowerCase()));
+  if (!dirs.length) return;
+  const chunks = Number(sh('/usr/bin/find ' + dirs.map(q).join(' ') +
     ' -type f -amin -1 2>/dev/null | /usr/bin/head -50 | /usr/bin/wc -l').trim()) || 0;
   if (chunks < YT_MIN_CHUNKS) return;
   log('offline YouTube during ' + routine.name + ': ' + chunks + ' chunks read in the last minute' +
@@ -589,7 +600,7 @@ function offlineYouTube(cfg, kid, u, now) {
     () => { action(kid, 'Offline YouTube during ' + routine.name + ' (' + chunks + ' chunks a minute): warned, closing YouTube.');
             dialog(u, fill(TEXTS[lang].offline, { name: routine.name, seconds: YT_GRACE_MS / 1000 }), YT_GRACE_MS / 1000); },
     () => {
-      const n = closeTabs(u, YOUTUBE_TAB_CONDITION);
+      const n = closeTabs(u, youtubeTabCondition(kid));
       if (n > 0) { log('closed ' + n + ' YouTube tab(s) of ' + u.name + ' (offline YouTube during ' + routine.name + ')'); return; }
       // With tab control working but no YouTube tab open, closing the whole browser would only
       // punish the child for whatever else is open: log it and leave the browser alone.

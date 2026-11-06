@@ -83,7 +83,9 @@ routine runs, the guard checks every 30 s whether Chrome, Brave, Edge or Opera h
 or more chunks of offline YouTube in the last minute. If so, it shows a warning and, 15 seconds
 later, closes the YouTube tabs; the whole browser is closed only if it cannot close tabs. It reads the files' access times (APFS updates them on read) and does not
 delete anything. Set `"offline_youtube": "log"` in `config.json` to only log, or `"off"` to
-disable it.
+disable it. A YouTube site the parent allowed by name in the default rules' website
+exceptions (e.g. `music.youtube.com`, for YouTube Music) is left alone: Qustodio lets it through
+during routines too.
 
 **Offline.** The rules, today's usage and any running grant are cached. While the API cannot
 be reached, the guard adds the screen time it counts on the Mac itself to the last figure it
