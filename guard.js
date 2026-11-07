@@ -30,7 +30,7 @@ const BLOCK_DEVICE = 2;   // routine policy.block_type: 0 = rules only, 1 = no i
 const TICK_GAP_MS = 30e3; // a longer gap between runs means the Mac slept: not screen time
 const IDLE_MS = 120e3;    // no keyboard/mouse for this long: away, not screen time
 const ENTERTAINMENT = 6;  // Qustodio web category: YouTube and other video sites
-const YT_CHECK_MS = 30e3; // how often to look for offline YouTube playback
+const YT_CHECK_MS = 30e3; // how often to look for offline playback of blocked sites
 const YT_MIN_CHUNKS = 3;  // offline chunks read in the last minute that mean "a video is playing"
 const LOGOUT_WAIT_MS = 30e3; // a normal logout not done by then (an app asking to save…) is forced
 const YT_GRACE_MS = 15e3; // from the warning to closing an app, a tab or a video: enough to pause, not to watch
@@ -54,14 +54,14 @@ function enforceable(app) {
 // Never closed, whatever a routine says: the desktop itself, Qustodio, and remote support.
 const ALWAYS_OK = /^(com\.apple\.(finder|dock|loginwindow|systemuiserver|controlcenter|notificationcenterui|spotlight|securityagent|coreservices\..*|screensaver.*|wifi\..*|universalaccess.*)|com\.qustodio\..*|com\.teamviewer\..*)$/;
 // Browsers are never closed for not being on a routine's app list: what they may open is the web
-// rules' business, and offline YouTube and local video are caught separately. A routine that
+// rules' business, and offline sites and local video are caught separately. A routine that
 // forgot to allow a browser would otherwise take school away with it.
 const BROWSER_APPS = /^(com\.google\.chrome(\.beta|\.canary)?|com\.apple\.safari|com\.operasoftware\.opera.*|com\.brave\.browser.*|com\.microsoft\.edgemac.*|org\.mozilla\.firefox.*|org\.chromium\.chromium)$/;
 // Installed web apps (PWAs, e.g. YouTube Music) are a site in a browser window. The web rules
 // already decide whether the site loads, and their process is the browser's, so "closing" one
 // closed all of Chrome. Seen live 2026-10-18.
 const WEB_APPS = /^(com\.google\.chrome|com\.brave\.browser|com\.microsoft\.edgemac|org\.chromium\.chromium)\.app\./;
-// Browsers whose YouTube Premium offline downloads live in <profile>/IndexedDB, and their processes.
+// Browsers whose sites keep offline downloads (YouTube Premium) in <profile>/IndexedDB, and their processes.
 const BROWSERS = [
   ['Google/Chrome', 'Google Chrome'], ['BraveSoftware/Brave-Browser', 'Brave Browser'],
   ['Microsoft Edge', 'Microsoft Edge'], ['com.operasoftware.Opera', 'Opera'],
@@ -70,42 +70,42 @@ const BROWSERS = [
 const TEXTS = {
   en: { app: '{app} isn\'t allowed during {name}.\nIt will close in {seconds} s.',
         video: 'Watching downloaded videos isn\'t allowed during {name}.\nThe video will be closed in {seconds} s.',
-        offline: 'Offline YouTube isn\'t allowed during {name}.\nYouTube will be closed in {seconds} s.',
+        offline: '{site} offline isn\'t allowed during {name}.\nIt will be closed in {seconds} s.',
         site: '{site} isn\'t allowed during {name}.\nThe tab will close in {seconds} s.',
         routine: 'routine: {name} (device blocked)',
         hours: 'outside allowed hours', quota: 'daily limit used ({used} of {quota} min)',
         text: "Time's up: {why}.\nSave your work — you will be logged out in {seconds} s." },
   uk: { app: '{app} під час «{name}» не можна.\nЗастосунок закриється через {seconds} с.',
         video: 'Дивитися завантажені відео під час «{name}» не можна.\nВідео закриється через {seconds} с.',
-        offline: 'Офлайн-YouTube під час «{name}» не можна.\nYouTube закриється через {seconds} с.',
+        offline: '{site} офлайн під час «{name}» не можна.\nЗакриється через {seconds} с.',
         site: '{site} під час «{name}» не можна.\nВкладка закриється через {seconds} с.',
         routine: 'розпорядок «{name}» (пристрій заблоковано)',
         hours: 'поза дозволеними годинами', quota: 'денний ліміт вичерпано ({used} з {quota} хв)',
         text: 'Час вийшов: {why}.\nЗбережи роботу — через {seconds} с буде вихід із системи.' },
   nl: { app: '{app} is niet toegestaan tijdens {name}.\nDe app sluit over {seconds} s.',
         video: 'Gedownloade video\'s kijken is niet toegestaan tijdens {name}.\nDe video wordt over {seconds} s gesloten.',
-        offline: 'Offline YouTube is niet toegestaan tijdens {name}.\nYouTube wordt over {seconds} s gesloten.',
+        offline: '{site} offline is niet toegestaan tijdens {name}.\nHet wordt over {seconds} s gesloten.',
         site: '{site} is niet toegestaan tijdens {name}.\nHet tabblad sluit over {seconds} s.',
         routine: 'routine {name} (apparaat geblokkeerd)',
         hours: 'buiten de toegestane uren', quota: 'daglimiet bereikt ({used} van {quota} min)',
         text: 'De tijd is om: {why}.\nSla je werk op — over {seconds} s word je uitgelogd.' },
   de: { app: '{app} ist während {name} nicht erlaubt.\nDie App wird in {seconds} s geschlossen.',
         video: 'Heruntergeladene Videos sind während {name} nicht erlaubt.\nDas Video wird in {seconds} s geschlossen.',
-        offline: 'Offline-YouTube ist während {name} nicht erlaubt.\nYouTube wird in {seconds} s geschlossen.',
+        offline: '{site} offline ist während {name} nicht erlaubt.\nEs wird in {seconds} s geschlossen.',
         site: '{site} ist während {name} nicht erlaubt.\nDer Tab wird in {seconds} s geschlossen.',
         routine: 'Routine {name} (Gerät gesperrt)',
         hours: 'außerhalb der erlaubten Zeiten', quota: 'Tageslimit erreicht ({used} von {quota} Min.)',
         text: 'Die Zeit ist um: {why}.\nSpeichere deine Arbeit — in {seconds} s wirst du abgemeldet.' },
   es: { app: '{app} no está permitido durante {name}.\nSe cerrará en {seconds} s.',
         video: 'Ver vídeos descargados no está permitido durante {name}.\nEl vídeo se cerrará en {seconds} s.',
-        offline: 'YouTube sin conexión no está permitido durante {name}.\nYouTube se cerrará en {seconds} s.',
+        offline: '{site} sin conexión no está permitido durante {name}.\nSe cerrará en {seconds} s.',
         site: '{site} no está permitido durante {name}.\nLa pestaña se cerrará en {seconds} s.',
         routine: 'rutina {name} (dispositivo bloqueado)',
         hours: 'fuera del horario permitido', quota: 'límite diario agotado ({used} de {quota} min)',
         text: 'Se acabó el tiempo: {why}.\nGuarda tu trabajo: la sesión se cerrará en {seconds} s.' },
   fr: { app: '{app} n\'est pas autorisé pendant {name}.\nL\'app se fermera dans {seconds} s.',
         video: 'Regarder des vidéos téléchargées n\'est pas autorisé pendant {name}.\nLa vidéo sera fermée dans {seconds} s.',
-        offline: 'YouTube hors ligne n\'est pas autorisé pendant {name}.\nYouTube sera fermé dans {seconds} s.',
+        offline: '{site} hors ligne n\'est pas autorisé pendant {name}.\nIl sera fermé dans {seconds} s.',
         site: '{site} n\'est pas autorisé pendant {name}.\nL\'onglet sera fermé dans {seconds} s.',
         routine: 'routine {name} (appareil bloqué)',
         hours: 'en dehors des heures autorisées', quota: 'limite quotidienne atteinte ({used} sur {quota} min)',
@@ -585,14 +585,9 @@ function listTabs(u) {
   }
   return tabs;
 }
-const YOUTUBE_URL = /^https?:\/\/([a-z0-9-]+\.)*youtube\.com(\/|$)/i;
-const YOUTUBE_HOSTS = ['youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com'];
 // A host on the parent's allowed list, or under one of its domains.
 const siteAllowed = (kid, host) => (kid.allowed_sites || []).some(d => host === d || host.endsWith('.' + d));
 const hostOf = url => ((/^[a-z]+:\/\/([^\/:?#]+)/i.exec(url) || [])[1] || '').toLowerCase();
-// The AppleScript condition for the YouTube tabs to close: allowed hosts are left open.
-const youtubeTabCondition = kid => YOUTUBE_HOSTS.filter(h => !siteAllowed(kid, h))
-  .flatMap(h => ['u starts with "https://' + h + '/"', 'u starts with "http://' + h + '/"', 'u is "https://' + h + '"']).join(' or ') || 'false';
 // The AppleScript condition for tabs on exactly these hosts (as the tabs' own URLs spell them).
 const hostsCondition = hosts => hosts.flatMap(h => ['u starts with "https://' + h + '/"', 'u starts with "http://' + h + '/"',
   'u is "https://' + h + '"', 'u is "http://' + h + '"']).join(' or ') || 'false';
@@ -600,8 +595,8 @@ const hostsCondition = hosts => hosts.flatMap(h => ['u starts with "https://' + 
 // Tabs of sites the running routine blocks. When a routine starts (or the Mac wakes into one, or
 // extra time ends), tabs whose site the guard cannot place are loaded again once, so Qustodio
 // judges them: its own block page then replaces them. Tabs of sites known to be blocked are
-// warned about and closed, like YouTube; allowed sites are never touched, homework open in a
-// tab is not reloaded.
+// warned about and closed; allowed sites are never touched, homework open in a tab is not
+// reloaded. YouTube is a site like any other here (Entertainment): no list of hosts in the code.
 function blockedSites(cfg, kid, u, now, routine) {
   const mode = cfg.blocked_sites || 'block';
   if (mode === 'off' || !routine.web || kid.tab_control !== 'ok') return;
@@ -611,7 +606,7 @@ function blockedSites(cfg, kid, u, now, routine) {
   const tabs = listTabs(u);
   if (!tabs) return;
   kid.sites_routine = routine.uid;
-  const hosts = [...new Set(tabs.filter(t => /^https?:\/\//i.test(t.url) && !YOUTUBE_URL.test(t.url)).map(t => hostOf(t.url)))]
+  const hosts = [...new Set(tabs.filter(t => /^https?:\/\//i.test(t.url)).map(t => hostOf(t.url)))]
     .filter(h => /^[a-z0-9.-]+$/.test(h)); // goes into AppleScript as text
   const blocked = hosts.filter(h => siteVerdict(kid, routine, h) === 'blocked');
   if (started) {
@@ -649,70 +644,59 @@ function tabControlProbe(kid, u, now) {
   kid.tab_control = state;
 }
 
-// YouTube Premium lets a browser download videos into the site's own storage and play them with no
-// network request, so Qustodio's web filter never sees them. While a routine that blocks
-// Entertainment runs (Homework…), a browser reading those files means a video is playing:
+// Sites can store videos in the browser and play them with no network request (YouTube Premium's
+// downloads), so Qustodio's web filter never sees them. With tab control that does not matter:
+// the tab's address is what blockedSites judges, online or not. Without it the guard cannot see
+// the tabs, only each site's storage on disk (https_<host>_0.indexeddb.blob): while a routine
+// runs, a browser reading the stored files of a site the routine blocks means it is in use —
 // warn, then close the browser. The files' access time is the signal (APFS updates it on read;
-// looking with stat/find does not).
-function offlineYouTube(cfg, kid, u, now) {
-  const mode = cfg.offline_youtube || 'block';
-  const routine = mode !== 'off' && activeRoutines(kid, now).find(r => r.noVideo && r.block !== BLOCK_DEVICE);
-  if (!routine) return;
-  if (!due(kid, 'yt_checked_at', YT_CHECK_MS, 'offline-youtube', now)) return;
-  const lang = langOf(cfg, kid);
-  // With tab control, look at the tabs themselves. While the routine blocks Entertainment,
-  // Qustodio blocks YouTube online, so an open YouTube tab is offline YouTube or a block page —
-  // either way it should not be there. This is the reliable signal: the file access times below
-  // are updated by macOS only on the first read after a write, or once a day.
-  const tabs = kid.tab_control === 'ok' ? listTabs(u) : null;
-  if (tabs) {
-    const yt = tabs.filter(t => YOUTUBE_URL.test(t.url) && !siteAllowed(kid, hostOf(t.url)));
-    if (!yt.length) return;
-    log('YouTube open during ' + routine.name + ': ' + yt.length + ' tab(s)' + (mode === 'log' ? ' (log only)' : ''));
-    if (mode === 'log') return;
-    strike(kid, 'offline-youtube', now, YT_GRACE_MS,
-      () => { action(kid, 'YouTube open during ' + routine.name + ' (' + yt.length + ' tab(s)): warned, closing it.');
-              dialog(u, fill(TEXTS[lang].offline, { name: routine.name, seconds: YT_GRACE_MS / 1000 }), YT_GRACE_MS / 1000); },
-      () => { const n = closeTabs(u, youtubeTabCondition(kid));
-              log('closed ' + n + ' YouTube tab(s) of ' + u.name + ' (' + routine.name + ')'); });
-    return;
-  }
+// looking with stat/find does not), and a weak one: macOS updates it only on the first read after
+// a write, or once a day. Which sites count comes from their Qustodio categories, as for tabs.
+function offlineSites(cfg, kid, u, now, routine) {
+  const mode = cfg.offline_sites || cfg.offline_youtube || 'block';
+  if (mode === 'off' || !routine.web || kid.tab_control === 'ok') return;
+  if (!due(kid, 'stores_checked_at', YT_CHECK_MS, 'offline:', now)) return;
   // Re-discovered hourly, and on every check while nothing is found: a profile gets its first
   // download at some point, and an empty answer must not stick for the day.
-  if (!kid.yt_dirs || !kid.yt_dirs.length || now - (kid.yt_dirs_at || 0) > 3600e3) {
+  if (!kid.store_dirs || !kid.store_dirs.length || now - (kid.store_dirs_at || 0) > 3600e3) {
     const support = '/Users/' + u.name + '/Library/Application Support/';
     const found = [], errors = [];
     for (const [d] of BROWSERS) {
-      const r = sh('/usr/bin/find ' + q(support + d) + ' -maxdepth 4 -type d -name "https_*youtube.com_*.indexeddb.blob" 2>&1 || true');
+      const r = sh('/usr/bin/find ' + q(support + d) + ' -maxdepth 4 -type d -name "https_*_*.indexeddb.blob" 2>&1 || true');
       for (const line of r.split('\n').filter(Boolean))
         (line.startsWith('/') && !/: (Operation not permitted|Permission denied|No such file)/.test(line) ? found : errors).push(line);
     }
     const relevant = errors.filter(e => !/No such file/.test(e));
-    const summary = found.length + ' offline-YouTube store(s)' + (relevant.length ? '; errors: ' + relevant.slice(0, 3).join(' | ') : '');
-    if (summary !== kid.yt_dirs_log) log('offline YouTube watch: ' + summary); // log changes only
-    kid.yt_dirs_log = summary;
-    kid.yt_dirs = found;
-    kid.yt_dirs_at = now.getTime();
+    const summary = found.length + ' site store(s)' + (relevant.length ? '; errors: ' + relevant.slice(0, 3).join(' | ') : '');
+    if (summary !== kid.store_dirs_log) log('offline sites watch: ' + summary); // log changes only
+    kid.store_dirs_log = summary;
+    kid.store_dirs = found;
+    kid.store_dirs_at = now.getTime();
   }
-  // Stores are named https_<host>_0.indexeddb.blob: an allowed site's own (YouTube Music) is not watched.
-  const dirs = kid.yt_dirs.filter(d => !siteAllowed(kid, ((/https_(.+?)_\d+\.indexeddb\.blob$/.exec(d) || [])[1] || '').toLowerCase()));
+  // Only the stores of sites the routine blocks: an allowed site's own (YouTube Music) is not watched.
+  const storeHost = d => ((/https_(.+?)_\d+\.indexeddb\.blob$/.exec(d) || [])[1] || '').toLowerCase();
+  const dirs = kid.store_dirs.filter(d => /^[a-z0-9.-]+$/.test(storeHost(d)) && siteVerdict(kid, routine, storeHost(d)) === 'blocked');
   if (!dirs.length) return;
-  const chunks = Number(sh('/usr/bin/find ' + dirs.map(q).join(' ') +
-    ' -type f -amin -1 2>/dev/null | /usr/bin/head -50 | /usr/bin/wc -l').trim()) || 0;
-  if (chunks < YT_MIN_CHUNKS) return;
-  log('offline YouTube during ' + routine.name + ': ' + chunks + ' chunks read in the last minute' +
+  const reading = dirs.map(d => [d, Number(sh('/usr/bin/find ' + q(d) +
+    ' -type f -amin -1 2>/dev/null | /usr/bin/head -50 | /usr/bin/wc -l').trim()) || 0]).filter(([, n]) => n >= YT_MIN_CHUNKS);
+  if (!reading.length) return;
+  const hosts = [...new Set(reading.map(([d]) => storeHost(d)))];
+  const site = [...new Set(hosts.map(h => h.replace(/^www\./, '')))].join(', ');
+  const chunks = reading.reduce((n, [, c]) => n + c, 0);
+  log('offline ' + site + ' during ' + routine.name + ': ' + chunks + ' chunks read in the last minute' +
       (mode === 'log' ? ' (log only)' : ''));
   if (mode === 'log') return;
-  strike(kid, 'offline-youtube', now, YT_GRACE_MS,
-    () => { action(kid, 'Offline YouTube during ' + routine.name + ' (' + chunks + ' chunks a minute): warned, closing YouTube.');
-            dialog(u, fill(TEXTS[lang].offline, { name: routine.name, seconds: YT_GRACE_MS / 1000 }), YT_GRACE_MS / 1000); },
+  const lang = langOf(cfg, kid);
+  strike(kid, 'offline:' + routine.uid, now, YT_GRACE_MS,
+    () => { action(kid, 'Offline ' + site + ' during ' + routine.name + ' (' + chunks + ' chunks a minute): warned, closing it.');
+            dialog(u, fill(TEXTS[lang].offline, { site, name: routine.name, seconds: YT_GRACE_MS / 1000 }), YT_GRACE_MS / 1000); },
     () => {
-      const n = closeTabs(u, youtubeTabCondition(kid));
-      if (n > 0) { log('closed ' + n + ' YouTube tab(s) of ' + u.name + ' (offline YouTube during ' + routine.name + ')'); return; }
-      // With tab control working but no YouTube tab open, closing the whole browser would only
-      // punish the child for whatever else is open: log it and leave the browser alone.
-      if (n === 0) { log('offline YouTube during ' + routine.name + ' but no YouTube tab is open; browser left alone'); return; }
-      log('closing browsers of ' + u.name + ' (offline YouTube during ' + routine.name + '; tabs could not be closed)');
+      const n = closeTabs(u, hostsCondition(hosts));
+      if (n > 0) { log('closed ' + n + ' tab(s) of ' + site + ' (offline during ' + routine.name + ')'); return; }
+      // Tabs can be closed but none of that site is open: closing the whole browser would only
+      // punish the child for whatever else is open. Log it and leave the browser alone.
+      if (n === 0) { log('offline ' + site + ' during ' + routine.name + ' but no tab of it is open; browser left alone'); return; }
+      log('closing browsers of ' + u.name + ' (offline ' + site + ' during ' + routine.name + '; tabs could not be closed)');
       for (const [, proc] of BROWSERS) quit(u, proc);
     });
 }
@@ -827,7 +811,7 @@ function heartbeat(u, now, today) {
       version: st.version, console: u.name, routine: activeRoutines(k, now).map(r => r.name).join(', ') || null,
       used_min: k.used_date === today ? k.used_min : 0, quota_min: ((k.rules || {}).quotas || {})[day],
       bonus: bonusRunning(k, now, today), api_fail: k.api_fail || 0,
-      offline_youtube_stores: (k.yt_dirs || []).length, tab_control: k.tab_control || null,
+      site_stores: (k.store_dirs || []).length, tab_control: k.tab_control || null,
       queued: (st.outbox || []).length } });
   }
   while ((st.outbox || []).length && post(st.outbox[0])) st.outbox.shift(); // retry queued reports
@@ -882,8 +866,8 @@ function run(argv) {
     alarm(kid, 'token:' + kid.profile_name, kid.api_fail > 0 && /no refresh token|error: 40[01]/.test(err),
           'Qustodio login rejected — re-run qustodio-token.sh on this Mac (was the parent password changed?). ' + err);
     alarm(kid, 'profile:' + u.name, kid.api_fail > 0 && /Qustodio profile/.test(err), err);
-    alarm(kid, 'stores:' + kid.profile_name, /errors:/.test(kid.yt_dirs_log || ''),
-          'Cannot look into the browsers\' offline YouTube storage: ' + (kid.yt_dirs_log || ''));
+    alarm(kid, 'stores:' + kid.profile_name, /errors:/.test(kid.store_dirs_log || ''),
+          'Cannot look into the browsers\' site storage: ' + (kid.store_dirs_log || ''));
     if (!kid.api_fail) kid.api_error = null;
   }
 
@@ -901,10 +885,9 @@ function run(argv) {
     const routine = !v && !bonusRunning(kid, now, today) &&
       activeRoutines(kid, now).find(r => r.block !== BLOCK_DEVICE && (r.apps || r.noVideo || r.web));
     if (routine) {
-      offlineYouTube(cfg, kid, u, now);
+      offlineSites(cfg, kid, u, now, routine);
       routineApps(cfg, kid, u, now, routine); localVideo(cfg, kid, u, now, routine); blockedSites(cfg, kid, u, now, routine);
     } else {
-      if (!v && !bonusRunning(kid, now, today)) offlineYouTube(cfg, kid, u, now);
       kid.sites_routine = null; // the next routine (or the end of extra time) counts as a start
     }
   }

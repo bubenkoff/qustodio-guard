@@ -76,27 +76,30 @@ it warns and, 15 seconds later, closes that tab or player. iMovie is deliberatel
 school is not watching one. Recording, which writes, does not count, and neither do videos
 inside app bundles. `"local_video": "log"` or `"off"`.
 
-**Offline YouTube.** YouTube Premium can download videos into the browser's own storage and play
-them with no network request, so Qustodio's web filter never sees them. A child can download in
-free time and watch during a routine that blocks Entertainment (e.g. Homework). While such a
-routine runs, the guard checks every 30 s whether Chrome, Brave, Edge or Opera has read three
-or more chunks of offline YouTube in the last minute. If so, it shows a warning and, 15 seconds
-later, closes the YouTube tabs; the whole browser is closed only if it cannot close tabs. It reads the files' access times (APFS updates them on read) and does not
-delete anything. Set `"offline_youtube": "log"` in `config.json` to only log, or `"off"` to
-disable it. A YouTube site the parent allowed by name in the default rules' website
-exceptions (e.g. `music.youtube.com`, for YouTube Music) is left alone: Qustodio lets it through
-during routines too.
-
 **Tabs opened before a routine.** Qustodio judges a page only when it loads, so a site opened in
 free time keeps working in its tab once School or Homework starts (Netflix, browser games). The
 guard learns each site's categories from Qustodio's own timeline, where every web event carries
 them, and keeps them per host. While a routine runs it checks the open tabs every 30 s: a tab
 whose site has **every** category blocked by the routine gets a warning and is closed 15 seconds
-later, like YouTube. A site with any allowed category stays (canva.com is Education as well as
+later. YouTube is no exception (youtube.com is Entertainment); there is no list of
+sites in the code. A site with any allowed category stays (canva.com is Education as well as
 Entertainment, and Qustodio lets it through). When a routine starts (or the Mac wakes into one, or
 extra time ends), tabs of sites with no known category are loaded once more, so Qustodio judges
 them itself; allowed sites are not reloaded. Needs the Automation permission (below). Sites the
 parent allowed by name are never touched. `"blocked_sites": "log"` or `"off"`.
+Since the tab's address is what counts, this also covers videos a site plays offline from
+the browser's storage (YouTube Premium downloads).
+
+**Offline sites, without tab control.** Some sites store videos in the browser and play them
+with no network request (YouTube Premium downloads), so Qustodio's web filter never sees them.
+With the Automation permission the tab rule above catches them. Without it the guard cannot see
+tabs, so it watches each site's storage on disk instead: while a routine runs, every 30 s it
+checks whether Chrome, Brave, Edge or Opera has read three or more stored chunks in the last
+minute of a site whose categories the routine blocks. If so, it shows a warning and, 15 seconds
+later, closes that site's tabs, or the whole browser if it cannot close tabs. It reads the files'
+access times (APFS updates them on read, but only on the first read after a write, or once a day)
+and does not delete anything. Sites the parent allowed by name (e.g. `music.youtube.com`) are not
+watched. `"offline_sites": "log"` or `"off"` (the old `"offline_youtube"` key still works).
 
 **Offline.** The rules, today's usage and any running grant are cached. While the API cannot
 be reached, the guard adds the screen time it counts on the Mac itself to the last figure it
@@ -148,7 +151,7 @@ Optional `/var/root/qustodio-guard/config.json`:
 
 ```json
 { "profile": "Alex", "user": "alex", "grace_seconds": 60, "lang": "uk",
-  "offline_youtube": "block", "routine_apps": "block", "local_video": "block", "blocked_sites": "block",
+  "offline_sites": "block", "routine_apps": "block", "local_video": "block", "blocked_sites": "block",
   "message": "Time's up: {why}.\nSave your work — you will be logged out in {seconds} s." }
 ```
 
@@ -187,7 +190,7 @@ is open, newer events are only logged and acted on.
 
 - **macOS permissions** (System Settings → Privacy & Security):
   - **Full Disk Access for `/usr/bin/osascript`**. On macOS 27 the daemon otherwise cannot look into the
-    browsers' data, and offline YouTube goes unseen. The guard alerts when this happens.
+    browsers' data, and offline sites go unseen without tab control. The guard alerts when this happens.
   - **Automation → Google Chrome (and Safari…)** in the child's session, so only the offending tab is
     closed. The guard raises the prompt itself while Chrome is open, so be at the Mac to approve it.
     Without it, the whole browser is closed instead.
