@@ -87,6 +87,17 @@ disable it. A YouTube site the parent allowed by name in the default rules' webs
 exceptions (e.g. `music.youtube.com`, for YouTube Music) is left alone: Qustodio lets it through
 during routines too.
 
+**Tabs opened before a routine.** Qustodio judges a page only when it loads, so a site opened in
+free time keeps working in its tab once School or Homework starts (Netflix, browser games). The
+guard learns each site's categories from Qustodio's own timeline, where every web event carries
+them, and keeps them per host. While a routine runs it checks the open tabs every 30 s: a tab
+whose site has **every** category blocked by the routine gets a warning and is closed 15 seconds
+later, like YouTube. A site with any allowed category stays (canva.com is Education as well as
+Entertainment, and Qustodio lets it through). When a routine starts (or the Mac wakes into one, or
+extra time ends), tabs of sites with no known category are loaded once more, so Qustodio judges
+them itself; allowed sites are not reloaded. Needs the Automation permission (below). Sites the
+parent allowed by name are never touched. `"blocked_sites": "log"` or `"off"`.
+
 **Offline.** The rules, today's usage and any running grant are cached. While the API cannot
 be reached, the guard adds the screen time it counts on the Mac itself to the last figure it
 got from the cloud. Sleep and more than 2 minutes without keyboard or mouse input do not count.
@@ -137,7 +148,7 @@ Optional `/var/root/qustodio-guard/config.json`:
 
 ```json
 { "profile": "Alex", "user": "alex", "grace_seconds": 60, "lang": "uk",
-  "offline_youtube": "block", "routine_apps": "block", "local_video": "block",
+  "offline_youtube": "block", "routine_apps": "block", "local_video": "block", "blocked_sites": "block",
   "message": "Time's up: {why}.\nSave your work — you will be logged out in {seconds} s." }
 ```
 
@@ -152,7 +163,7 @@ network may have its own host at the local address, and falls back to the local 
 - **alerts** when it cannot do its job: the API has been failing for ~3 h, the Qustodio login
   is rejected, the profile is not found, or the browsers' storage cannot be read. Each alert
   repeats every 12 h while it lasts, and a resolved message follows when it ends;
-- **actions** at the first warning: logging out, closing an app, stopping offline or local video.
+- **actions** at the first warning: logging out, closing an app or a blocked site's tab, stopping offline or local video.
 
 Alerts and actions are queued while HA is unreachable. Payload:
 `{host, kid, event: heartbeat|alert|resolved|action, key, message, status}`. A Home Assistant

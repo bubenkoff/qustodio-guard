@@ -35,6 +35,9 @@ const YT_MIN_CHUNKS = 3;  // offline chunks read in the last minute that mean "a
 const LOGOUT_WAIT_MS = 30e3; // a normal logout not done by then (an app asking to save…) is forced
 const YT_GRACE_MS = 15e3; // from the warning to closing an app, a tab or a video: enough to pause, not to watch
 const APPS_CHECK_MS = 10e3;  // how often to compare running apps with the routine's allow-list
+const SITES_CHECK_MS = 30e3; // how often to look for open tabs of sites the routine blocks
+const SITES_READ_MS = 5 * 60e3; // how often to read new site categories from Qustodio's timeline
+const SITES_DAYS = 14;       // how far back the first timeline read goes
 const VIDEO_CHECK_MS = 30e3; // how often to look for local video files open in players
 const VIDEO_FILE = /\.(mp4|m4v|mov|mkv|webm|avi|wmv|flv|mpe?g|ts|m2ts|3gp)$/i;
 // Apps that play video. Matched against lsof's full command name (helpers included); iMovie is
@@ -68,36 +71,42 @@ const TEXTS = {
   en: { app: '{app} isn\'t allowed during {name}.\nIt will close in {seconds} s.',
         video: 'Watching downloaded videos isn\'t allowed during {name}.\nThe video will be closed in {seconds} s.',
         offline: 'Offline YouTube isn\'t allowed during {name}.\nYouTube will be closed in {seconds} s.',
+        site: '{site} isn\'t allowed during {name}.\nThe tab will close in {seconds} s.',
         routine: 'routine: {name} (device blocked)',
         hours: 'outside allowed hours', quota: 'daily limit used ({used} of {quota} min)',
         text: "Time's up: {why}.\nSave your work — you will be logged out in {seconds} s." },
   uk: { app: '{app} під час «{name}» не можна.\nЗастосунок закриється через {seconds} с.',
         video: 'Дивитися завантажені відео під час «{name}» не можна.\nВідео закриється через {seconds} с.',
         offline: 'Офлайн-YouTube під час «{name}» не можна.\nYouTube закриється через {seconds} с.',
+        site: '{site} під час «{name}» не можна.\nВкладка закриється через {seconds} с.',
         routine: 'розпорядок «{name}» (пристрій заблоковано)',
         hours: 'поза дозволеними годинами', quota: 'денний ліміт вичерпано ({used} з {quota} хв)',
         text: 'Час вийшов: {why}.\nЗбережи роботу — через {seconds} с буде вихід із системи.' },
   nl: { app: '{app} is niet toegestaan tijdens {name}.\nDe app sluit over {seconds} s.',
         video: 'Gedownloade video\'s kijken is niet toegestaan tijdens {name}.\nDe video wordt over {seconds} s gesloten.',
         offline: 'Offline YouTube is niet toegestaan tijdens {name}.\nYouTube wordt over {seconds} s gesloten.',
+        site: '{site} is niet toegestaan tijdens {name}.\nHet tabblad sluit over {seconds} s.',
         routine: 'routine {name} (apparaat geblokkeerd)',
         hours: 'buiten de toegestane uren', quota: 'daglimiet bereikt ({used} van {quota} min)',
         text: 'De tijd is om: {why}.\nSla je werk op — over {seconds} s word je uitgelogd.' },
   de: { app: '{app} ist während {name} nicht erlaubt.\nDie App wird in {seconds} s geschlossen.',
         video: 'Heruntergeladene Videos sind während {name} nicht erlaubt.\nDas Video wird in {seconds} s geschlossen.',
         offline: 'Offline-YouTube ist während {name} nicht erlaubt.\nYouTube wird in {seconds} s geschlossen.',
+        site: '{site} ist während {name} nicht erlaubt.\nDer Tab wird in {seconds} s geschlossen.',
         routine: 'Routine {name} (Gerät gesperrt)',
         hours: 'außerhalb der erlaubten Zeiten', quota: 'Tageslimit erreicht ({used} von {quota} Min.)',
         text: 'Die Zeit ist um: {why}.\nSpeichere deine Arbeit — in {seconds} s wirst du abgemeldet.' },
   es: { app: '{app} no está permitido durante {name}.\nSe cerrará en {seconds} s.',
         video: 'Ver vídeos descargados no está permitido durante {name}.\nEl vídeo se cerrará en {seconds} s.',
         offline: 'YouTube sin conexión no está permitido durante {name}.\nYouTube se cerrará en {seconds} s.',
+        site: '{site} no está permitido durante {name}.\nLa pestaña se cerrará en {seconds} s.',
         routine: 'rutina {name} (dispositivo bloqueado)',
         hours: 'fuera del horario permitido', quota: 'límite diario agotado ({used} de {quota} min)',
         text: 'Se acabó el tiempo: {why}.\nGuarda tu trabajo: la sesión se cerrará en {seconds} s.' },
   fr: { app: '{app} n\'est pas autorisé pendant {name}.\nL\'app se fermera dans {seconds} s.',
         video: 'Regarder des vidéos téléchargées n\'est pas autorisé pendant {name}.\nLa vidéo sera fermée dans {seconds} s.',
         offline: 'YouTube hors ligne n\'est pas autorisé pendant {name}.\nYouTube sera fermé dans {seconds} s.',
+        site: '{site} n\'est pas autorisé pendant {name}.\nL\'onglet sera fermé dans {seconds} s.',
         routine: 'routine {name} (appareil bloqué)',
         hours: 'en dehors des heures autorisées', quota: 'limite quotidienne atteinte ({used} sur {quota} min)',
         text: 'Le temps est écoulé : {why}.\nEnregistre ton travail — déconnexion dans {seconds} s.' },
@@ -219,6 +228,7 @@ function refresh(dir, cfg, st, kid, u, today) {
       uid: r.uid, name: r.name, enabled: !!r.enabled, on: r.enabled && !r.paused,
       counts: !!(r.policy || {}).counts_towards_daily_time_quota, block: (r.policy || {}).block_type || 0,
       noVideo: entertainmentBlocked((r.policy || {}).web_rules),
+      web: webRules((r.policy || {}).web_rules),
       apps: appRules((r.policy || {}).app_rules),
       // A paused routine's schedules too: the parent app can switch to a paused routine (Free is
       // paused here), and that switch is an overriding schedule on it.
@@ -233,6 +243,7 @@ function refresh(dir, cfg, st, kid, u, today) {
     const fresh = kid.routines.map(r => (r.enabled ?? r.on) ? (curl(dir, base + '/' + r.uid + '/schedules', { bearer }).items_list || []) : []);
     kid.routines.forEach((r, i) => { r.schedules = fresh[i]; });
   }
+  readSiteCategories(dir, kid, bearer);
   // Quota time = time under the default rules + time in routines that count towards it.
   const counting = new Set(kid.routines.filter(r => r.counts).map(r => r.uid));
   kid.used_min = Math.round(hourly.reduce((a, e) => a + (e.default_rules_screen_time || 0) +
@@ -254,6 +265,57 @@ function entertainmentBlocked(web) {
   if (!web) return false;
   const rule = (web.web_rules_list || []).find(w => w.category === ENTERTAINMENT);
   return web.default_action === 1 ? !(rule && rule.action === 0) : !!(rule && rule.action === 1);
+}
+
+// A routine's web policy: default action and per-category actions (0 = allow, 1 = block).
+function webRules(web) {
+  if (!web) return null;
+  const cats = {};
+  for (const w of web.web_rules_list || []) if ('category' in w) cats[w.category] = w.action;
+  return { def: web.default_action || 0, cats };
+}
+function categoryBlocked(web, c) {
+  return web.def === 1 ? web.cats[c] !== 0 : web.cats[c] === 1;
+}
+
+// Qustodio judges a page only when it loads: a site opened before Homework keeps working in its
+// tab (Netflix and crazygames, 2026-11-07). To close such tabs the guard needs each site's
+// categories, and only Qustodio's cloud knows them. Its timeline does: every web event carries
+// the site's categories. Kept per host and merged, so sites seen weeks ago stay known.
+function readSiteCategories(dir, kid, bearer) {
+  if (kid.sites_read_at && Date.now() - kid.sites_read_at < SITES_READ_MS) return;
+  const now = Date.now();
+  const from = kid.sites_read_at ? kid.sites_read_at - 3600e3 : now - SITES_DAYS * 864e5;
+  try {
+    const ev = curl(dir, API + '/v2/accounts/' + kid.account_uid + '/profiles/' + kid.profile_uid +
+                    '/events?min_date=' + stamp(new Date(from)) + '&max_date=' + stamp(new Date(now + 864e5)) +
+                    '&limit=2000', { bearer }).timeline || [];
+    const cats = kid.site_cats || {};
+    for (const e of ev) {
+      if (e.type !== 101 || !e.host || !(e.categories || []).length) continue;
+      const h = String(e.host).toLowerCase();
+      cats[h] = [...new Set((cats[h] || []).concat(e.categories))].sort((a, b) => a - b);
+    }
+    kid.site_cats = cats;
+    kid.sites_read_at = now;
+  } catch (e) {
+    kid.sites_read_at = now - SITES_READ_MS + 60e3; // try again in a minute, keep what is known
+    log('site categories not read from the timeline: ' + e.message);
+  }
+}
+function stamp(d) {
+  return ymd(d) + 'T' + [d.getHours(), d.getMinutes(), d.getSeconds()].map(n => String(n).padStart(2, '0')).join(':');
+}
+
+// What the routine says about a host: 'allowed' (the parent's allowed sites, or a category the
+// routine allows), 'blocked' (every category Qustodio gave the site is blocked), or 'unknown'.
+// Every category, not any: Qustodio let canva.com (Education, Entertainment…) through in Homework.
+function siteVerdict(kid, routine, host) {
+  if (siteAllowed(kid, host)) return 'allowed';
+  const cats = kid.site_cats || {};
+  for (let h = host; h.includes('.'); h = h.slice(h.indexOf('.') + 1))
+    if (cats[h]) return cats[h].every(c => categoryBlocked(routine.web, c)) ? 'blocked' : 'allowed';
+  return 'unknown';
 }
 
 // A routine's app policy, Mac part only: default action, per-app and per-category rules.
@@ -484,13 +546,19 @@ function localVideo(cfg, kid, u, now, routine) {
 // child's session; the child can revoke it. Returns the number of tabs closed, or -1 when it could
 // not ask (no permission, no answer within 10 s); callers then close the whole browser instead.
 const TAB_BROWSERS = ['Google Chrome', 'Brave Browser', 'Microsoft Edge', 'Safari'];
-function closeTabs(u, condition) {
+function closeTabs(u, condition) { return eachTab(u, condition, () => 'close tab i of w'); }
+// Load the matching tabs again, so that Qustodio judges them under the rules in force now.
+// Safari has no reload command; setting a tab's URL to itself loads it again.
+function reloadTabs(u, condition) {
+  return eachTab(u, condition, app => app === 'Safari' ? 'set URL of tab i of w to u' : 'reload tab i of w');
+}
+function eachTab(u, condition, command) {
   let closed = 0, failed = false;
   for (const app of TAB_BROWSERS) {
     if (!sh('/usr/bin/pgrep -u ' + u.uid + ' -x ' + q(app) + ' >/dev/null && echo up || true').trim()) continue;
     const script = 'tell application "' + app + '"\n set n to 0\n repeat with w in windows\n' +
       '  repeat with i from (count of tabs of w) to 1 by -1\n   set u to URL of tab i of w\n' +
-      '   if ' + condition + ' then\n    close tab i of w\n    set n to n + 1\n   end if\n  end repeat\n' +
+      '   if ' + condition + ' then\n    ' + command(app) + '\n    set n to n + 1\n   end if\n  end repeat\n' +
       ' end repeat\n return n\nend tell';
     const out = sh('/bin/launchctl asuser ' + u.uid + ' /usr/bin/sudo -u ' + q(u.name) +
                    ' /usr/bin/perl -e ' + q('alarm 10; exec @ARGV') + ' /usr/bin/osascript -e ' + q(script) + ' 2>&1 || true').trim();
@@ -525,6 +593,45 @@ const hostOf = url => ((/^[a-z]+:\/\/([^\/:?#]+)/i.exec(url) || [])[1] || '').to
 // The AppleScript condition for the YouTube tabs to close: allowed hosts are left open.
 const youtubeTabCondition = kid => YOUTUBE_HOSTS.filter(h => !siteAllowed(kid, h))
   .flatMap(h => ['u starts with "https://' + h + '/"', 'u starts with "http://' + h + '/"', 'u is "https://' + h + '"']).join(' or ') || 'false';
+// The AppleScript condition for tabs on exactly these hosts (as the tabs' own URLs spell them).
+const hostsCondition = hosts => hosts.flatMap(h => ['u starts with "https://' + h + '/"', 'u starts with "http://' + h + '/"',
+  'u is "https://' + h + '"', 'u is "http://' + h + '"']).join(' or ') || 'false';
+
+// Tabs of sites the running routine blocks. When a routine starts (or the Mac wakes into one, or
+// extra time ends), tabs whose site the guard cannot place are loaded again once, so Qustodio
+// judges them: its own block page then replaces them. Tabs of sites known to be blocked are
+// warned about and closed, like YouTube; allowed sites are never touched, homework open in a
+// tab is not reloaded.
+function blockedSites(cfg, kid, u, now, routine) {
+  const mode = cfg.blocked_sites || 'block';
+  if (mode === 'off' || !routine.web || kid.tab_control !== 'ok') return;
+  const started = kid.sites_routine !== routine.uid;
+  if (!started && !due(kid, 'sites_checked_at', SITES_CHECK_MS, 'site:', now)) return;
+  kid.sites_checked_at = now.getTime();
+  const tabs = listTabs(u);
+  if (!tabs) return;
+  kid.sites_routine = routine.uid;
+  const hosts = [...new Set(tabs.filter(t => /^https?:\/\//i.test(t.url) && !YOUTUBE_URL.test(t.url)).map(t => hostOf(t.url)))]
+    .filter(h => /^[a-z0-9.-]+$/.test(h)); // goes into AppleScript as text
+  const blocked = hosts.filter(h => siteVerdict(kid, routine, h) === 'blocked');
+  if (started) {
+    const unknown = hosts.filter(h => siteVerdict(kid, routine, h) === 'unknown');
+    if (unknown.length && mode !== 'log') {
+      const n = reloadTabs(u, hostsCondition(unknown));
+      log(routine.name + ' started: reloaded ' + n + ' tab(s) of sites with no known category: ' + unknown.join(', '));
+    }
+  }
+  if (!blocked.length) return;
+  log('blocked sites open during ' + routine.name + ': ' + blocked.join(', ') + (mode === 'log' ? ' (log only)' : ''));
+  if (mode === 'log') return;
+  const lang = langOf(cfg, kid), site = blocked.map(h => h.replace(/^www\./, '')).join(', ');
+  strike(kid, 'site:' + routine.uid, now, YT_GRACE_MS,
+    () => { action(kid, site + ' open during ' + routine.name + ': warned, closing the tab(s).');
+            dialog(u, fill(TEXTS[lang].site, { site, name: routine.name, seconds: YT_GRACE_MS / 1000 }), YT_GRACE_MS / 1000); },
+    () => { const n = closeTabs(u, hostsCondition(blocked));
+            log('closed ' + n + ' tab(s) of ' + site + ' (' + routine.name + ')'); });
+}
+
 const VIDEO_URL = /^file:\/\/.*\.(mp4|m4v|mov|mkv|webm|avi|wmv|flv|mpe?g|ts|m2ts|3gp)$/i;
 const VIDEO_TAB_CONDITION = '(u starts with "file://") and (' +
   ['mp4', 'm4v', 'mov', 'mkv', 'webm', 'avi', 'wmv', 'flv', 'mpg', 'mpeg', 'ts', 'm2ts', '3gp']
@@ -791,10 +898,14 @@ function run(argv) {
     tabControlProbe(kid, u, now);
     // Extra time from the parent app runs under the free rules — Qustodio books it to the "Free"
     // routine — so a bonus in the middle of Homework lifts Homework's app and video rules too.
-    if (!v && !bonusRunning(kid, now, today)) {
+    const routine = !v && !bonusRunning(kid, now, today) &&
+      activeRoutines(kid, now).find(r => r.block !== BLOCK_DEVICE && (r.apps || r.noVideo || r.web));
+    if (routine) {
       offlineYouTube(cfg, kid, u, now);
-      const routine = activeRoutines(kid, now).find(r => r.block !== BLOCK_DEVICE && (r.apps || r.noVideo));
-      if (routine) { routineApps(cfg, kid, u, now, routine); localVideo(cfg, kid, u, now, routine); }
+      routineApps(cfg, kid, u, now, routine); localVideo(cfg, kid, u, now, routine); blockedSites(cfg, kid, u, now, routine);
+    } else {
+      if (!v && !bonusRunning(kid, now, today)) offlineYouTube(cfg, kid, u, now);
+      kid.sites_routine = null; // the next routine (or the end of extra time) counts as a start
     }
   }
   save();
