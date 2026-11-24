@@ -225,3 +225,17 @@ is open, newer events are only logged and acted on.
 ## License
 
 MIT
+
+## The API from your own computer: `tools/qustodio_api.py`
+
+For reading or changing a child's rules from a workstation (Python 3, no dependencies):
+
+```bash
+tools/qustodio_api.py login        # once per machine, in your own terminal: through the browser
+tools/qustodio_api.py ids          # account and profile ids
+tools/qustodio_api.py get 'v2/accounts/{uid}/profiles/{puid:Alex}/routines'
+```
+
+It keeps its own refresh token in `~/.config/qustodio/` (mode 600), separate from the guards'.
+Endpoints: [docs/API.md](docs/API.md). Other scripts can import it (`from qustodio_api import call`
+with `tools/` on `sys.path`).
