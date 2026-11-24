@@ -22,8 +22,15 @@ The same bundle holds the web category map: search for `{educational:4,`.
 `POST https://api.qustodio.com/v1/oauth2/access_token`, form-encoded:
 - `client_id=264ca1d226906aa08b03`, `client_secret=3e8826cbed3b996f8b206c7d6a4b2321529bc6bd`
   (the web app's own client, not a secret of ours);
-- `grant_type=password` with `username` and `password`, or `grant_type=refresh_token` with
-  `refresh_token`.
+- `grant_type=password` with `username` and `password` (refused, HTTP 401, once the account has
+  two-step login on), or `grant_type=refresh_token` with `refresh_token`.
+
+With two-step login, sign in through Qustodio's login page instead:
+`https://auth.qustodio.com/en/sso/login/?response_type=code&state=…&client_id=kWyT0DkAqK1GKIFkEpY5DVckfwqru0ZDJi8YBKjJ&redirect_uri=https://family.qustodio.com/parents-app`
+(plus base64 JSON `details` and `conf`), the Android parent app's client, which the page takes. After
+sign-in the browser lands on `…/parents-app?kind=auth-code&authorization_code=…&state=…` (not the usual
+`?code=`). Exchange it with `grant_type=authorization_code`, `code`, `redirect_uri` and that client's id
+and secret (`qustodio-token.sh` has them); its refresh tokens renew only through the same client.
 
 The response carries `access_token`, `refresh_token` and `expires_in`, about 30 days. Send
 `Authorization: Bearer <access_token>`. See `qustodio-token.sh`.

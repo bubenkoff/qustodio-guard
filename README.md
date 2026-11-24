@@ -119,9 +119,20 @@ curl -fsSL https://github.com/bubenkoff/qustodio-guard/archive/refs/heads/main.t
 sudo /tmp/qustodio-guard-main/install.sh
 ```
 
-The installer asks once for the **parent's** Qustodio e-mail and password. It stores only the
-OAuth refresh token, in `/var/root/qustodio-guard/token` (root-only, mode 600). The password
-never touches disk or any process's argv.
+The installer signs in once as the **parent**, through your browser: it prints the address of
+Qustodio's login page, you sign in there (with the two-step code, if that is on) in any browser,
+and paste back the address of the blank `family.qustodio.com/parents-app?…authorization_code=…`
+page it lands on. It stores only the OAuth refresh token, in `/var/root/qustodio-guard/token`
+(root-only, mode 600), and in `client` which OAuth client it belongs to. Neither the code nor a
+password touches disk or any process's argv. `qustodio-token.sh <token-file> --password` is the old
+e-mail and password login, which Qustodio refuses once two-step login is on.
+
+To sign in again (a changed password, or the guard's "login rejected" alert), from your own
+terminal:
+
+```bash
+ssh -t <parent>@<kid's Mac> 'sudo "/Library/Application Support/qustodio-guard/qustodio-token.sh" /var/root/qustodio-guard/token'
+```
 
 If automatic detection cannot match the account (for example, it was renamed after Qustodio was
 installed), name the profile yourself:

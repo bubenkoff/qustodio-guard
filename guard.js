@@ -21,6 +21,11 @@ const API = 'https://api.qustodio.com';
 // github.com/matt-richardson/home-assistant-qustodio — not a secret of ours.
 const CLIENT_ID = '264ca1d226906aa08b03';
 const CLIENT_SECRET = '3e8826cbed3b996f8b206c7d6a4b2321529bc6bd';
+// The Android parent app's client: a token from qustodio-token.sh's browser login (the only one
+// that works with two-step login on) belongs to it, and is renewed through it. `client` next to
+// the token says which: "browser", or "password" / missing for the web app's.
+const BROWSER_CLIENT_ID = 'kWyT0DkAqK1GKIFkEpY5DVckfwqru0ZDJi8YBKjJ';
+const BROWSER_CLIENT_SECRET = 'SO1ntU0sNhkPNMbKTKzXlQtybAJ6911ew8TnePJcwganNCh7rJ54nCH512Z5ZzfHJKR4LQUusMAiur3oFFJhq2eNDyvg2w4v1dBh8Yeqx1bcLDUrVYMIBSak9PNOHdKE';
 const DAYS = ['sun', 'mon', 'tue', 'wed', 'thr', 'fri', 'sat']; // Qustodio spells Thursday "thr"
 const MACOS = 1; // device.platform
 const REFRESH_MS = 60e3;  // API at most this often; screen time there lags minutes anyway
@@ -143,13 +148,19 @@ function curl(dir, url, opts) {
 }
 
 function accessToken(dir, st) {
-  if (st.access_token && st.access_expires > Date.now() + 3600e3) return st.access_token;
   const refresh = (readFile(dir + '/token') || '').trim();
+  // A new login (a new token file) takes effect at once, not when the old access token expires.
+  if (st.access_token && st.access_expires > Date.now() + 3600e3 && st.access_from === refresh) return st.access_token;
   if (!refresh) throw new Error('no refresh token in ' + dir + '/token — run qustodio-token.sh');
+  const browser = (readFile(dir + '/client') || '').trim() === 'browser';
   const r = curl(dir, API + '/v1/oauth2/access_token', {
-    form: { client_id: CLIENT_ID, client_secret: CLIENT_SECRET, grant_type: 'refresh_token', refresh_token: refresh },
+    form: { client_id: browser ? BROWSER_CLIENT_ID : CLIENT_ID,
+            client_secret: browser ? BROWSER_CLIENT_SECRET : CLIENT_SECRET,
+            grant_type: 'refresh_token', refresh_token: refresh },
   });
-  if (r.refresh_token && r.refresh_token !== refresh) writeFile(dir + '/token', r.refresh_token + '\n');
+  const kept = r.refresh_token || refresh;
+  if (kept !== refresh) writeFile(dir + '/token', kept + '\n');
+  st.access_from = kept;
   st.access_token = r.access_token;
   st.access_expires = Date.now() + r.expires_in * 1000;
   return st.access_token;
@@ -864,7 +875,7 @@ function run(argv) {
     alarm(kid, 'api:' + kid.profile_name, kid.api_fail >= API_ALERT_FAILS,
           'Qustodio API failing for ' + kid.api_fail + ' polls (~' + Math.round(kid.api_fail / 60) + ' h); running on cached rules. Last error: ' + err);
     alarm(kid, 'token:' + kid.profile_name, kid.api_fail > 0 && /no refresh token|error: 40[01]/.test(err),
-          'Qustodio login rejected — re-run qustodio-token.sh on this Mac (was the parent password changed?). ' + err);
+          'Qustodio login rejected — sign in again: sudo qustodio-token.sh /var/root/qustodio-guard/token on this Mac, over ssh -t (was the parent password changed?). ' + err);
     alarm(kid, 'profile:' + u.name, kid.api_fail > 0 && /Qustodio profile/.test(err), err);
     alarm(kid, 'stores:' + kid.profile_name, /errors:/.test(kid.store_dirs_log || ''),
           'Cannot look into the browsers\' site storage: ' + (kid.store_dirs_log || ''));
